@@ -8,6 +8,7 @@ import json
 import time
 
 import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
@@ -960,6 +961,33 @@ def build_subject_year_trend(board_sheets):
     return pd.concat(frames, ignore_index=True)
 
 
+def compute_subject_trend_stats(df):
+    """Given df with columns Year, Subject, Pass %, fit a linear trend per subject.
+    Returns a DataFrame: Subject, Years, Slope (pp/yr), Total Change (pp), Start %, End %, Next Year Projection."""
+    if df.empty or df["Year"].nunique() < 2:
+        return pd.DataFrame(columns=["Subject", "Years", "Slope (pp/yr)", "Total Change (pp)", "Start %", "End %", "Next Yr Proj %"])
+    rows = []
+    for subject, sd in df.groupby("Subject"):
+        sd = sd.dropna(subset=["Pass %"]).sort_values("Year")
+        if len(sd) < 2:
+            continue
+        years = sd["Year"].astype(float).to_numpy()
+        pass_pct = sd["Pass %"].astype(float).to_numpy()
+        slope, intercept = np.polyfit(years, pass_pct, 1)
+        next_year = years.max() + 1
+        projection = float(np.clip(slope * next_year + intercept, 0, 100))
+        rows.append({
+            "Subject": subject,
+            "Years": f"{int(years.min())}–{int(years.max())}",
+            "Slope (pp/yr)": round(float(slope), 2),
+            "Total Change (pp)": round(float(pass_pct[-1] - pass_pct[0]), 2),
+            "Start %": round(float(pass_pct[0]), 1),
+            "End %": round(float(pass_pct[-1]), 1),
+            "Next Yr Proj %": round(projection, 1),
+        })
+    return pd.DataFrame(rows)
+
+
 def render_overview(boards, year):
     master = get_master_summary(boards)
     rankings = get_all_board_rankings(boards, year)
@@ -1326,6 +1354,35 @@ def render_board_page(
                 st.info("No data matches the current filters.")
             else:
                 show_chart(subject_multi_year_trend_chart(plot_df, "Subject Pass % by Year"))
+
+                # --- Trend insights: most improved / most declining subjects ---
+                trend_stats = compute_subject_trend_stats(subj_trend_df)
+                if not trend_stats.empty:
+                    st.markdown("##### 🔎 Trend Insights")
+                    improved = trend_stats.sort_values("Slope (pp/yr)", ascending=False).head(5)
+                    declined = trend_stats.sort_values("Slope (pp/yr)", ascending=True).head(5)
+                    ic1, ic2 = st.columns(2)
+                    with ic1:
+                        st.markdown("**📈 Most Improved**")
+                        st.dataframe(
+                            improved[["Subject", "Slope (pp/yr)", "Total Change (pp)", "Start %", "End %"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    with ic2:
+                        st.markdown("**📉 Most Declining**")
+                        st.dataframe(
+                            declined[["Subject", "Slope (pp/yr)", "Total Change (pp)", "Start %", "End %"]],
+                            use_container_width=True, hide_index=True,
+                        )
+                    with st.expander("📐 Next-year projection (linear trend, not an actual result)"):
+                        st.caption(
+                            "Projected by fitting a straight line through each subject's Pass % across the selected "
+                            "years and extrapolating one year forward. Treat as a rough directional estimate only."
+                        )
+                        proj_tbl = trend_stats.sort_values("Next Yr Proj %", ascending=False)[
+                            ["Subject", "Years", "End %", "Next Yr Proj %"]
+                        ]
+                        st.dataframe(proj_tbl, use_container_width=True, hide_index=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     has_gender = not gender_df.empty
