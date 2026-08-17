@@ -3,14 +3,15 @@ BISE 10th Grade 2024-26 Result — Enhanced Results Dashboard
 Run: streamlit run app.py
 """
 
-import json
-import time
+import importlib
 
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+import data_loader
+importlib.reload(data_loader)
 from data_loader import (
     BOARD_NAMES,
     aggregate_demo_rows,
@@ -38,44 +39,6 @@ from data_loader import (
     validate_totals,
     _extract_groupwise_type as extract_groupwise_type,
 )
-import data_loader
-
-# #region agent log
-DEBUG_LOG_PATH = "debug-c865f9.log"
-DEBUG_ENDPOINT = "http://127.0.0.1:7778/ingest/b2547032-ded2-4a39-b793-e630640d666a"
-DEBUG_SESSION = "c865f9"
-
-
-def debug_log(location, message, data=None, hypothesis_id="A", run_id="features"):
-    payload = {
-        "sessionId": DEBUG_SESSION,
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data or {},
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload) + "\n")
-    except OSError:
-        pass
-    try:
-        import urllib.request
-
-        req = urllib.request.Request(
-            DEBUG_ENDPOINT,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "X-Debug-Session-Id": DEBUG_SESSION},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=1)
-    except Exception:
-        pass
-
-
-# #endregion
 
 st.set_page_config(
     page_title="BISE 10th Grade Results Dashboard",
@@ -464,19 +427,6 @@ def donut_pie(labels, values, colors, title="", height=400):
         margin=margins,
     )
     fig = style_fig(fig)
-    # #region agent log
-    debug_log(
-        "app.py:donut_pie",
-        "Pie legend layout",
-        {
-            "labels": n,
-            "margin_b": fig.layout.margin.b,
-            "legend_orientation": fig.layout.legend.orientation,
-            "legend_y": fig.layout.legend.y,
-        },
-        "J",
-    )
-    # #endregion
     return fig
 
 
@@ -1683,18 +1633,6 @@ with st.sidebar:
         year_options = ["All Years"] + avail_years
     else:
         year_options = avail_years or [2024]
-
-    # FIX: st.selectbox keeps its value in st.session_state under `key`. On rerun it
-    # restores that stored value (ignoring `index=0`) rather than re-deriving it from
-    # `year_options`. When switching boards whose available years differ (e.g. a board
-    # with 2024-2026 -> a board with only 2024), the previously selected year can be
-    # invalid for the new `year_options`, which raises a StreamlitAPIException or leaves
-    # the widget stuck — this was the root cause of the year filter appearing "broken"
-    # when moving between boards. Reset the stored value before the widget renders if
-    # it's no longer a valid option.
-    if "year_filter" in st.session_state and st.session_state["year_filter"] not in year_options:
-        st.session_state["year_filter"] = year_options[0]
-
     selected_year = st.selectbox("📅 Select Year", options=year_options, index=0, key="year_filter")
     year_label = selected_year if selected_year == "All Years" else selected_year
     st.markdown(
