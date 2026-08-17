@@ -59,10 +59,10 @@ BOARD_NAMES = {
     "GRW": "BISE Gujranwala",
 }
 
-# Some boards publish official 10th-class headline stats on the Regular row (not Overall).
-BOARD_TOTAL_MODE = {
-    "FSD": "regular",
-}
+# Some boards publish official 10th-class headline stats on a row other than "Overall".
+# FSD's "Overall" row (Regular + Private combined) is the board's official published
+# total (verified against BISE Faisalabad gazette figures) — do not override it here.
+BOARD_TOTAL_MODE = {}
 
 PUNJAB_PREFIXES = ("FBISE", "SWL", "RWP", "FSD", "LHR", "BWP", "GRW")
 
@@ -131,6 +131,9 @@ def _split_sheet_name(sheet_name: str):
 
 
 def filter_df_year(df: pd.DataFrame, year):
+    class_col = find_col(df, "Exam Class", "Class")
+    if class_col is not None:
+        df = df[~df[class_col].astype(str).str.contains("9th", case=False, na=False)]
     if year is None:
         return df.copy()
     ycol = find_col(df, "Year")
@@ -303,14 +306,40 @@ def load_workbook():
             if header_row_idx is None:
                 continue
             headers = raw.iloc[header_row_idx].tolist()
+            headers_norm = [str(h).strip().lower() if pd.notna(h) else "" for h in headers]
             data_rows = []
-            for i in range(header_row_idx + 1, len(raw)):
+            i = header_row_idx + 1
+            n = len(raw)
+            while i < n:
                 row = raw.iloc[i]
                 if row.notna().sum() == 0:
+                    # Blank row: look ahead past any blank/label rows for a repeated header,
+                    # which signals a stacked sub-table (e.g. "Science Group" then "General
+                    # Group" in the same sheet) that would otherwise be silently dropped.
+                    j = i + 1
+                    found_header = False
+                    while j < n:
+                        nn = raw.iloc[j].notna().sum()
+                        if nn == 0:
+                            j += 1
+                            continue
+                        if nn == 1:
+                            j += 1  # section-title row, keep looking
+                            continue
+                        candidate_norm = [str(c).strip().lower() if pd.notna(c) else "" for c in raw.iloc[j].tolist()]
+                        if candidate_norm == headers_norm:
+                            found_header = True
+                            j += 1
+                        break
+                    if found_header:
+                        i = j
+                        continue
                     if data_rows:
                         break
+                    i += 1
                     continue
                 data_rows.append(row)
+                i += 1
             if not data_rows:
                 continue
             df = pd.DataFrame(data_rows)
@@ -442,10 +471,14 @@ def _filter_board_summary_rows(df: pd.DataFrame, board_prefix: str | None = None
 
 
 def split_matches_total(split_df: pd.DataFrame, total_appeared: int, value_col: str = "Appeared") -> bool:
-    """True only when a gender/type split sums exactly to the board total."""
+    """True when a gender/type split sums close enough to the board total.
+    A small tolerance (0.5% or 5 students, whichever is larger) absorbs minor
+    source-data rounding without masking genuinely incomplete/missing splits."""
     if split_df.empty or total_appeared <= 0 or value_col not in split_df.columns:
         return False
-    return int(pd.to_numeric(split_df[value_col], errors="coerce").fillna(0).sum()) == int(total_appeared)
+    split_sum = int(pd.to_numeric(split_df[value_col], errors="coerce").fillna(0).sum())
+    tolerance = max(5, round(total_appeared * 0.005))
+    return abs(split_sum - int(total_appeared)) <= tolerance
 
 
 def _count_columns(df: pd.DataFrame):
@@ -770,6 +803,50 @@ def _extract_groupwise_type(board_sheets: dict, year=None) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _extract_combined_category_group_sheets(board_sheets: dict, year=None) -> pd.DataFrame:
+    """Parse boards (e.g. Kohat, Mardan) where each subject-group sheet ('Science
+    Group', 'General Group', 'Humanities Group', ...) has a single 'Category' column
+    combining gender + candidate type, e.g. 'Regular (Boys)' / 'Private (Female)'.
+    Sums matching rows across every such sheet for the board."""
+    empty = pd.DataFrame(columns=["Gender", "Candidate Type", "Group", "Appeared", "Passed", "Failed", "Pass %"])
+    rows = []
+    for label, df in board_sheets.items():
+        if "group" not in label.lower():
+            continue
+        cat_col = find_col(df, "Category")
+        appeared_col = find_col(df, "Appeared")
+        passed_col = find_col(df, "Passed", "Pass")
+        if not cat_col or not appeared_col:
+            continue
+        chunk = _coerce_numeric(filter_df_year(df, year))
+        for _, r in chunk.iterrows():
+            cand_type, gender = parse_category_field(r.get(cat_col))
+            if gender is None or cand_type is None:
+                continue
+            appeared = pd.to_numeric(r.get(appeared_col), errors="coerce")
+            passed = pd.to_numeric(r.get(passed_col), errors="coerce") if passed_col else None
+            if pd.isna(appeared) or appeared <= 0:
+                continue
+            if pd.isna(passed):
+                passed = 0
+            rows.append(
+                {
+                    "Gender": gender,
+                    "Candidate Type": cand_type,
+                    "Group": "All",
+                    "Appeared": int(appeared),
+                    "Passed": int(passed),
+                    "Failed": max(int(appeared - passed), 0),
+                }
+            )
+    if not rows:
+        return empty
+    out = pd.DataFrame(rows)
+    out = out.groupby(["Gender", "Candidate Type", "Group"], as_index=False)[["Appeared", "Passed", "Failed"]].sum()
+    out["Pass %"] = (100 * out["Passed"] / out["Appeared"].replace(0, pd.NA)).round(2)
+    return out
+
+
 def _gender_extractors():
     return (
         _extract_overview_gender_split,
@@ -780,10 +857,11 @@ def _gender_extractors():
         _extract_grades_by_gender,
         _extract_punjab_grand_total,
         _extract_yoy_regular_private,
+        _extract_combined_category_group_sheets,
     )
 
 
-def _parse_group_gender_rows(df: pd.DataFrame, cand_type: str) -> list[dict]:
+def _parse_group_gender_rows(df: pd.DataFrame, cand_type: str, year=None) -> list[dict]:
     if df is None or df.empty:
         return []
     df = _coerce_numeric(df)
@@ -792,6 +870,14 @@ def _parse_group_gender_rows(df: pd.DataFrame, cand_type: str) -> list[dict]:
     passed_col = find_col(df, "Passed", "Pass")
     pass_col = find_col(df, "Pass %", "Pass%")
     group_col = find_col(df, "Group")
+    class_col = find_col(df, "Exam Class", "Class")
+    if class_col:
+        df = df[~df[class_col].astype(str).str.contains("9th", case=False, na=False)]
+    if year is not None:
+        ys = str(year)
+        appeared_col = appeared_col if appeared_col and ys in str(appeared_col) else find_col(df, f"{ys} Appeared") or appeared_col
+        passed_col = passed_col if passed_col and ys in str(passed_col) else find_col(df, f"{ys} Passed") or passed_col
+        pass_col = pass_col if pass_col and ys in str(pass_col) else find_col(df, f"{ys} Pass %", f"{ys} Pass%") or pass_col
     if not gender_col or not appeared_col:
         return []
     rows = []
@@ -856,9 +942,11 @@ def _extract_punjab_grand_total(board_sheets: dict, year=None) -> pd.DataFrame:
                 continue
             ll = label.lower()
             if "regular" in ll and ("govt" in ll or "affiliated" in ll or "candidates sta" in ll):
-                rows.extend(_parse_group_gender_rows(df, "Regular"))
+                rows.extend(_parse_group_gender_rows(df, "Regular", year=y))
+            elif "private" in ll and "candidates sta" in ll:
+                rows.extend(_parse_group_gender_rows(df, "Private", year=y))
             elif re.search(rf"{ys}\s+private$", ll) or (ll.endswith(" private") and "district" not in ll and "pass" not in ll):
-                rows.extend(_parse_group_gender_rows(df, "Private"))
+                rows.extend(_parse_group_gender_rows(df, "Private", year=y))
     out = pd.DataFrame(rows)
     if out.empty:
         return out
@@ -922,44 +1010,57 @@ def _extract_grades_by_gender(board_sheets: dict, year=None) -> pd.DataFrame:
 
 
 def _extract_fsd_gender(board_sheets: dict, year=None) -> pd.DataFrame:
-    """FSD official 10th stats use Regular candidates (Gender-wise Result sheet)."""
+    """FSD gender split: Regular candidates come from the Regular Gender-School sheet
+    (mapped to 'Gender-wise Result'), Private candidates from the Private Gender sheet
+    (mapped to 'Gender-wise'). Both must be combined or the split silently drops every
+    private candidate and undercounts the board's true Appeared/Boys/Girls figures."""
     empty = pd.DataFrame(columns=["Gender", "Candidate Type", "Group", "Appeared", "Passed", "Failed", "Pass %"])
-    df = board_sheets.get("Gender-wise Result")
-    if df is None or df.empty:
-        return empty
-    df = _coerce_numeric(filter_df_year(df, year))
-    gender_col = find_col(df, "Gender")
-    appeared_col = find_col(df, "Appeared")
-    passed_col = find_col(df, "Passed", "Pass")
-    row_type_col = find_col(df, "Row_Type", "Row Type")
-    if not gender_col or not appeared_col:
-        return empty
-    chunk = df.copy()
-    if row_type_col:
-        chunk = chunk[chunk[row_type_col].astype(str).str.strip().str.lower() == "detail"]
-    chunk = chunk[chunk[gender_col].astype(str).str.strip().isin(["Male", "Female"])]
-    if chunk.empty:
-        return empty
+    sources = [
+        ("Gender-wise Result", "Regular"),
+        ("Gender-wise", "Private"),
+    ]
     rows = []
-    for gender in ("Male", "Female"):
-        sub = chunk[chunk[gender_col].astype(str).str.strip() == gender]
-        appeared = pd.to_numeric(sub[appeared_col], errors="coerce").sum()
-        passed = pd.to_numeric(sub[passed_col], errors="coerce").sum() if passed_col else 0
-        if pd.isna(appeared) or appeared <= 0:
+    for sheet_name, cand_type in sources:
+        df = board_sheets.get(sheet_name)
+        if df is None or df.empty:
             continue
-        passed = 0 if pd.isna(passed) else int(passed)
-        rows.append(
-            {
-                "Gender": gender,
-                "Candidate Type": "Regular",
-                "Group": "All",
-                "Appeared": int(appeared),
-                "Passed": passed,
-                "Failed": max(int(appeared - passed), 0),
-                "Pass %": round(100 * passed / appeared, 2) if appeared else None,
-            }
-        )
-    return pd.DataFrame(rows) if rows else empty
+        df = _coerce_numeric(filter_df_year(df, year))
+        gender_col = find_col(df, "Gender")
+        appeared_col = find_col(df, "Appeared")
+        passed_col = find_col(df, "Passed", "Pass")
+        row_type_col = find_col(df, "Row_Type", "Row Type")
+        if not gender_col or not appeared_col:
+            continue
+        chunk = df.copy()
+        if row_type_col:
+            chunk = chunk[chunk[row_type_col].astype(str).str.strip().str.lower() == "detail"]
+        chunk = chunk[chunk[gender_col].astype(str).str.strip().isin(["Male", "Female"])]
+        if chunk.empty:
+            continue
+        for gender in ("Male", "Female"):
+            sub = chunk[chunk[gender_col].astype(str).str.strip() == gender]
+            appeared = pd.to_numeric(sub[appeared_col], errors="coerce").sum()
+            passed = pd.to_numeric(sub[passed_col], errors="coerce").sum() if passed_col else 0
+            if pd.isna(appeared) or appeared <= 0:
+                continue
+            passed = 0 if pd.isna(passed) else int(passed)
+            rows.append(
+                {
+                    "Gender": gender,
+                    "Candidate Type": cand_type,
+                    "Group": "All",
+                    "Appeared": int(appeared),
+                    "Passed": passed,
+                    "Failed": max(int(appeared - passed), 0),
+                    "Pass %": round(100 * passed / appeared, 2) if appeared else None,
+                }
+            )
+    if not rows:
+        return empty
+    out = pd.DataFrame(rows)
+    out = out.groupby(["Gender", "Candidate Type", "Group"], as_index=False)[["Appeared", "Passed", "Failed"]].sum()
+    out["Pass %"] = (100 * out["Passed"] / out["Appeared"].replace(0, pd.NA)).round(2)
+    return out
 
 
 def extract_type_from_yoy(board_sheets: dict, year=None) -> pd.DataFrame:
@@ -1684,4 +1785,3 @@ __all__ = [
     "split_matches_total",
     "_extract_groupwise_type",
 ]
-
