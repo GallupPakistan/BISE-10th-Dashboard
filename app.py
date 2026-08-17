@@ -3,7 +3,6 @@ BISE 10th Grade 2024-26 Result — Enhanced Results Dashboard
 Run: streamlit run app.py
 """
 
-import importlib
 import json
 import time
 
@@ -12,8 +11,6 @@ import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
-import data_loader
-importlib.reload(data_loader)
 from data_loader import (
     BOARD_NAMES,
     aggregate_demo_rows,
@@ -41,6 +38,7 @@ from data_loader import (
     validate_totals,
     _extract_groupwise_type as extract_groupwise_type,
 )
+import data_loader
 
 # #region agent log
 DEBUG_LOG_PATH = "debug-c865f9.log"
@@ -1685,6 +1683,18 @@ with st.sidebar:
         year_options = ["All Years"] + avail_years
     else:
         year_options = avail_years or [2024]
+
+    # FIX: st.selectbox keeps its value in st.session_state under `key`. On rerun it
+    # restores that stored value (ignoring `index=0`) rather than re-deriving it from
+    # `year_options`. When switching boards whose available years differ (e.g. a board
+    # with 2024-2026 -> a board with only 2024), the previously selected year can be
+    # invalid for the new `year_options`, which raises a StreamlitAPIException or leaves
+    # the widget stuck — this was the root cause of the year filter appearing "broken"
+    # when moving between boards. Reset the stored value before the widget renders if
+    # it's no longer a valid option.
+    if "year_filter" in st.session_state and st.session_state["year_filter"] not in year_options:
+        st.session_state["year_filter"] = year_options[0]
+
     selected_year = st.selectbox("📅 Select Year", options=year_options, index=0, key="year_filter")
     year_label = selected_year if selected_year == "All Years" else selected_year
     st.markdown(
