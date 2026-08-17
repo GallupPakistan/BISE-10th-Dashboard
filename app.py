@@ -231,14 +231,20 @@ st.markdown(
     [data-testid="stSidebar"] .stSelectbox svg {{ fill: rgba(255,255,255,0.85) !important; }}
     [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,0.2); margin: 16px 0; }}
     [data-testid="stSidebar"] .stMultiSelect > div > div {{
-        background-color: rgba(255,255,255,0.10) !important;
-        border: 1px solid rgba(255,255,255,0.25) !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid rgba(255,255,255,0.35) !important;
         border-radius: 8px !important;
     }}
     [data-testid="stSidebar"] .stMultiSelect [data-baseweb="tag"] {{
-        background: rgba(255,255,255,0.22) !important;
-        border: 1px solid rgba(255,255,255,0.4) !important;
+        background: {NAVY} !important;
+        border: 1px solid {NAVY} !important;
         color: #FFFFFF !important;
+    }}
+    [data-testid="stSidebar"] .stMultiSelect [data-baseweb="tag"] span {{
+        color: #FFFFFF !important;
+    }}
+    [data-testid="stSidebar"] .stMultiSelect input {{
+        color: #1A1A2E !important;
     }}
     [data-testid="stSidebar"] .stSlider {{ color: rgba(255,255,255,0.9) !important; }}
     h1, h2, h3, h4 {{ color: {TEXT} !important; font-weight: 700; }}
