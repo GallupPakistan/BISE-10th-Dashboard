@@ -38,6 +38,7 @@ from data_loader import (
     summarize_gender,
     summarize_type,
     split_matches_total,
+    validate_totals,
     _extract_groupwise_type as extract_groupwise_type,
 )
 
@@ -279,8 +280,9 @@ st.markdown(
         box-shadow: 0 4px 20px rgba(15,86,148,0.22); padding: 0;
     }}
     .hero-watermark {{
-        position: absolute; right: 18%; top: 50%; transform: translateY(-50%);
-        width: 180px; height: 180px; opacity: 0.10; pointer-events: none;
+        position: absolute; right: 32%; top: 42%; transform: translateY(-50%);
+        width: 140px; height: 140px; opacity: 0.10; pointer-events: none;
+        z-index: 0;
     }}
     .hero-grid {{
         position: absolute; right: 12px; top: 12px; width: 80px; height: 80px;
@@ -785,23 +787,36 @@ def funnel_chart(stages, values, title="", height=380):
     return style_fig(fig)
 
 
-def waterfall_chart(labels, values, measures, title="", height=380):
-    if not labels:
+def stacked_bar_breakdown_chart(appeared, passed, failed, title="", height=380):
+    """Single stacked bar: Appeared total, split into Passed + Failed segments.
+    Replaces the old waterfall chart, which read as confusing negative bars."""
+    if appeared is None:
         return None
-    fig = go.Figure(
-        go.Waterfall(
-            x=labels,
-            y=values,
-            measure=measures,
-            increasing=dict(marker=dict(color=PASS_COLOR)),
-            decreasing=dict(marker=dict(color=FAIL_COLOR)),
-            totals=dict(marker=dict(color=NAVY)),
-            connector=dict(line=dict(color=BORDER)),
-            text=[f"{v:,.0f}" for v in values],
-            textposition="outside",
-        )
+    pass_pct = (passed / appeared * 100) if appeared else 0
+    fail_pct = (failed / appeared * 100) if appeared else 0
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=["Result Breakdown"], y=[passed], name="Passed",
+        marker=dict(color=PASS_COLOR),
+        text=[f"Passed: {passed:,.0f} ({pass_pct:.1f}%)"], textposition="inside",
+        width=[0.45],
+    ))
+    fig.add_trace(go.Bar(
+        x=["Result Breakdown"], y=[failed], name="Failed",
+        marker=dict(color=FAIL_COLOR),
+        text=[f"Failed: {failed:,.0f} ({fail_pct:.1f}%)"], textposition="inside",
+        width=[0.45],
+    ))
+    fig.update_layout(
+        barmode="stack",
+        title=chart_title(title),
+        height=height,
+        showlegend=True,
+        legend=legend_top_right(),
+        margin=chart_margins(title=title, legend_pos="top"),
+        yaxis=dict(title=f"Appeared: {appeared:,.0f}", showgrid=True, gridcolor="rgba(0,0,0,0.06)", griddash="dot"),
+        xaxis=dict(showgrid=False),
     )
-    fig.update_layout(title=chart_title(title), height=height, showlegend=False, margin=chart_margins(title=title))
     return style_fig(fig)
 
 
@@ -1191,6 +1206,17 @@ def render_board_page(
         unsafe_allow_html=True,
     )
 
+    _check = validate_totals(totals)
+    _gaps = []
+    if not _check["ok"]:
+        _gaps.append(_check["message"])
+    if gender_df.empty:
+        _gaps.append("Boys/Girls split not published for this selection")
+    if type_df.empty:
+        _gaps.append("Regular/Private split not published for this selection")
+    if _gaps:
+        st.caption("⚠️ Data completeness: " + " · ".join(_gaps))
+
     st.markdown('<div class="insight-box">', unsafe_allow_html=True)
     st.subheader("💡 Key Insights")
     for line in insights:
@@ -1201,6 +1227,7 @@ def render_board_page(
     girls = gender_df[gender_df["Gender"] == "Female"] if not gender_df.empty and "Gender" in gender_df.columns else pd.DataFrame()
     boys_total = int(boys["Appeared"].sum()) if not boys.empty else 0
     girls_total = int(girls["Appeared"].sum()) if not girls.empty else 0
+    gender_value = f"{fmt_k(boys_total)} / {fmt_k(girls_total)}" if not gender_df.empty else "Not available"
     reg_total = priv_total = 0
     if not type_df.empty and "Candidate Type" in type_df.columns:
         regular = type_df[type_df["Candidate Type"].str.contains("Regular", case=False, na=False)]
@@ -1214,17 +1241,18 @@ def render_board_page(
         ("Total Appeared", fmt_k(total_appeared), f"{selected_year if selected_year != 'All Years' else 'All years combined'}"),
         ("Total Pass", fmt_k(total_passed), f"{pass_pct:.0f}% of total{trend_note}"),
         ("Total Fail", fmt_k(total_failed), f"{fail_pct:.0f}% of total"),
-        ("Boys / Girls", f"{fmt_k(boys_total)} / {fmt_k(girls_total)}", "Gender split"),
+        ("Boys / Girls", gender_value, "Gender split" if not gender_df.empty else "Not in source data"),
     ]
     cols = st.columns(4)
     for col, accent, (label, value, sub) in zip(cols, kpi_accents, kpi_data):
         col.markdown(kpi_card(label, value, sub, accent), unsafe_allow_html=True)
 
-    if reg_total + priv_total > 0:
-        st.markdown(
-            kpi_card("Regular / Private", f"{fmt_k(reg_total)} / {fmt_k(priv_total)}", "Student type split", NAVY_LIGHT),
-            unsafe_allow_html=True,
-        )
+    reg_priv_value = f"{fmt_k(reg_total)} / {fmt_k(priv_total)}" if reg_total + priv_total > 0 else "Not available"
+    reg_priv_sub = "Student type split" if reg_total + priv_total > 0 else "Not in source data"
+    st.markdown(
+        kpi_card("Regular / Private", reg_priv_value, reg_priv_sub, NAVY_LIGHT),
+        unsafe_allow_html=True,
+    )
 
     st.write("")
     render_chart_legend()
@@ -1237,14 +1265,12 @@ def render_board_page(
         show_chart(gauge_chart(pass_pct, f"{selected_board_name} · Pass %"))
         st.markdown("</div>", unsafe_allow_html=True)
     with gc2:
-        # --- Chart: Waterfall — Appeared -> Passed -> Failed ---
+        # --- Chart: Stacked Bar — Appeared split into Passed + Failed ---
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.subheader("🧱 Result Breakdown (Waterfall)")
-        show_chart(waterfall_chart(
-            ["Appeared", "Passed", "Failed"],
-            [total_appeared, -total_passed, -total_failed],
-            ["absolute", "relative", "relative"],
-            "Appeared → Passed → Failed",
+        st.subheader("🧱 Result Breakdown (Passed vs Failed)")
+        show_chart(stacked_bar_breakdown_chart(
+            total_appeared, total_passed, total_failed,
+            "Appeared → Passed / Failed",
         ))
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1617,7 +1643,6 @@ def render_compare_page(boards, board_map, selected_names, year):
 # LOAD DATA
 # ----------------------------------------------------------------------
 try:
-    data_loader.load_workbook.clear()
     sheets = load_workbook()
 except FileNotFoundError:
     st.error(
@@ -1645,6 +1670,10 @@ with st.sidebar:
         </div>""",
         unsafe_allow_html=True,
     )
+    if st.button("🔄 Refresh Data", help="Reload the Excel workbook from disk (use after replacing/updating the file)"):
+        data_loader.load_workbook.clear()
+        st.rerun()
+
     st.markdown('<div class="sidebar-section">Filters</div>', unsafe_allow_html=True)
     selected_board_name = st.selectbox("📍 Select Board", options=board_list, key="board_filter")
     if selected_board_name == "Overview — All Boards":
