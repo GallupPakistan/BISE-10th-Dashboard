@@ -110,6 +110,7 @@ for g in ["Male", "Female"]:
 fig3 = grouped_bar_chart(
     board_pivot.index.tolist(), series, title="Pass % by Gender — per Board", y_title="Pass %",
     colors=[GENDER_COLORS["Male"], GENDER_COLORS["Female"]],
+    show_values=True, value_suffix="%",
 )
 show_chart(fig3)
 st.markdown("</div>", unsafe_allow_html=True)
@@ -162,6 +163,7 @@ with pc2:
     show_chart(grouped_bar_chart(
         prov_pivot_pct.index.tolist(), series_prov_pct, title="Pass % by Gender, by Province",
         y_title="Pass %", colors=[GENDER_COLORS["Male"], GENDER_COLORS["Female"]],
+        show_values=True, value_suffix="%",
     ))
 
 # Quick reading of the gender gap itself, per province — reuses the same
