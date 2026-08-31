@@ -125,7 +125,7 @@ if trend_rows:
     for p in trend_prov["Province"].unique():
         sub = trend_prov[trend_prov["Province"] == p].sort_values("Year")
         fig3.add_trace(go.Scatter(
-            x=sub["Year"].astype(str), y=sub["Pass %"], mode="lines+markers", name=p,
+            x=sub["Year"].astype(int).astype(str), y=sub["Pass %"], mode="lines+markers", name=p,
             line=dict(color=PROVINCE_COLORS.get(p, NAVY), width=3),
         ))
     fig3.update_layout(title="Pass % Trend by Province", yaxis=dict(title="Pass %"),
