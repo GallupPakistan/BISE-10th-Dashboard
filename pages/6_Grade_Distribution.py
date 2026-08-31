@@ -9,6 +9,7 @@ from common import (
     render_global_filters,
     load_boards, show_missing_workbook_error,
     extract_grade_distribution, kpi_card, show_chart, grade_hbar,
+    donut_pie, treemap_chart, grouped_bar_chart, PALETTE,
     csv_download_button, fmt_k, NAVY, TEAL,
 )
 
@@ -60,9 +61,37 @@ with c2:
     st.markdown(kpi_card("MOST COMMON GRADE", str(top_grade["Grade"]), f"{fmt_k(int(top_grade['Count']))} students", TEAL), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+gc1, gc2 = st.columns([1, 1])
+with gc1:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    show_chart(grade_hbar(combined, title="Grade Distribution — All Boards Combined"))
+    st.markdown("</div>", unsafe_allow_html=True)
+with gc2:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    grades_sorted = combined.sort_values("Count", ascending=False)
+    show_chart(donut_pie(
+        grades_sorted["Grade"].astype(str).tolist(), grades_sorted["Count"].tolist(),
+        PALETTE[: len(grades_sorted)], title="Grade Share — All Boards Combined",
+    ))
+    st.markdown("</div>", unsafe_allow_html=True)
+
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-show_chart(grade_hbar(combined, title="Grade Distribution — All Boards Combined"))
+show_chart(treemap_chart(combined["Grade"].astype(str).tolist(), combined["Count"].tolist(), title="Grade Distribution — Treemap"))
 st.markdown("</div>", unsafe_allow_html=True)
+
+if len(boards_sel) <= 8:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("📊 Grade Distribution — per Board")
+    board_grade_pivot = all_grades.pivot_table(index="Board", columns="Grade", values="Count", aggfunc="sum").fillna(0)
+    grade_order = combined.sort_values("Count", ascending=False)["Grade"].astype(str).tolist()
+    grade_cols = [g for g in grade_order if g in board_grade_pivot.columns]
+    series_grade = {str(g): board_grade_pivot[g].astype(int).tolist() for g in grade_cols}
+    show_chart(grouped_bar_chart(
+        board_grade_pivot.index.tolist(), series_grade, title="Grade Counts by Board", y_title="Students",
+        colors=PALETTE,
+    ))
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown("**Combined grade table**")
