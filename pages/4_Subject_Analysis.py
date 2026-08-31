@@ -9,6 +9,7 @@ from common import (
     render_global_filters,
     load_boards, show_missing_workbook_error,
     extract_subject_data, kpi_card, show_chart, subject_pass_hbar,
+    bubble_scatter_chart, treemap_chart,
     csv_download_button, fmt_k, NAVY, TEAL,
 )
 
@@ -131,6 +132,40 @@ else:
     st.dataframe(table_df, use_container_width=True, hide_index=True)
 
 csv_download_button(combined, "⬇️ Download combined CSV (all subjects, no threshold)", "subject_wise_combined.csv")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ── Additional views — weakest subjects + size-vs-performance ─────────────────
+sc1, sc2 = st.columns([1, 1])
+with sc1:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("🔻 Weakest 10 Subjects")
+    weakest10 = reliable.tail(10)
+    if weakest10.empty:
+        st.info("No subjects meet the minimum-appeared threshold above.")
+    else:
+        show_chart(subject_pass_hbar(weakest10, top_n=10))
+        st.caption(f"Lowest-performing subjects among the {len(reliable)} meeting the {min_appeared:,}-appeared floor.")
+    st.markdown("</div>", unsafe_allow_html=True)
+with sc2:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.subheader("🎯 Subject Size vs Pass %")
+    if reliable.empty:
+        st.info("No subjects meet the minimum-appeared threshold above.")
+    else:
+        bubble_df = reliable.sort_values("Appeared", ascending=False).head(25)
+        show_chart(bubble_scatter_chart(
+            bubble_df["Appeared"].tolist(), bubble_df["Pass %"].tolist(), bubble_df["Appeared"].tolist(),
+            bubble_df["Subject"].tolist(), title="Students Appeared vs Pass %", x_title="Students Appeared",
+        ))
+        st.caption("Bubble size = students appeared. Shows whether larger-enrollment subjects pass at higher or lower rates.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown('<div class="section-card">', unsafe_allow_html=True)
+st.subheader("🌳 Subject Share by Enrollment")
+if reliable.empty:
+    st.info("No subjects meet the minimum-appeared threshold above.")
+else:
+    show_chart(treemap_chart(reliable["Subject"].tolist(), reliable["Appeared"].tolist(), title="Subjects by Students Appeared"))
 st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
