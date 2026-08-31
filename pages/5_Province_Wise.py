@@ -10,7 +10,8 @@ from common import (
     load_boards, show_missing_workbook_error, get_master_summary,
     extract_board_totals, extract_yearly_trend, get_available_years,
     kpi_card, show_chart, style_fig, fmt_k, csv_download_button,
-    donut_pie, trend_line_chart, BOARD_PROVINCE, PROVINCE_COLORS, NAVY, TEAL,
+    donut_pie, trend_line_chart, grouped_bar_chart, treemap_chart,
+    BOARD_PROVINCE, PROVINCE_COLORS, PASS_COLOR, FAIL_COLOR, NAVY, TEAL,
 )
 import plotly.graph_objects as go
 
@@ -90,6 +91,24 @@ with col2:
     ))
     fig2.update_layout(title="Pass % by Province", yaxis_range=[0, 100])
     show_chart(style_fig(fig2))
+    st.markdown("</div>", unsafe_allow_html=True)
+
+pc1, pc2 = st.columns([1, 1])
+with pc1:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    show_chart(grouped_bar_chart(
+        prov["Province"].tolist(),
+        {"Passed": prov["Passed"].astype(int).tolist(), "Failed": prov["Failed"].astype(int).tolist()},
+        title="Passed vs Failed by Province", y_title="Students",
+        colors=[PASS_COLOR, FAIL_COLOR],
+    ))
+    st.markdown("</div>", unsafe_allow_html=True)
+with pc2:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    show_chart(treemap_chart(
+        prov["Province"].tolist(), prov["Appeared"].tolist(),
+        title="Province Share by Students Appeared",
+    ))
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
