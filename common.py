@@ -841,13 +841,18 @@ def stacked_area_chart(pivot_df, title="", y_title="Appeared", height=420):
     return style_fig(fig)
 
 
-def grouped_bar_chart(x, series, title="", y_title="Students", height=400, colors=None):
+def grouped_bar_chart(x, series, title="", y_title="Students", height=400, colors=None,
+                      show_values=False, value_suffix=""):
     if x is None or len(x) == 0:
         return None
     fig = go.Figure()
     palette = colors or [PASS_COLOR, FAIL_COLOR, NAVY, ACCENT]
     for i, (name, values) in enumerate(series.items()):
-        fig.add_trace(go.Bar(x=x, y=values, name=name, marker_color=palette[i % len(palette)]))
+        bar_kwargs = dict(x=x, y=values, name=name, marker_color=palette[i % len(palette)])
+        if show_values:
+            bar_kwargs["text"] = [f"{v:.1f}{value_suffix}" for v in values]
+            bar_kwargs["textposition"] = "outside"
+        fig.add_trace(go.Bar(**bar_kwargs))
     fig.update_layout(title=chart_title(title), barmode="group",
                       xaxis=dict(automargin=True), yaxis=dict(title=y_title),
                       height=height, legend=legend_top_right(),
