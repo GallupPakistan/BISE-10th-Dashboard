@@ -577,10 +577,14 @@ def pass_fail_hbar(df, label_col, title="", height=None):
                          orientation="h", marker_color=FAIL_COLOR,
                          text=[f"{v:.0f}%" for v in plot_df["Fail %"]],
                          textposition="inside", insidetextanchor="middle"))
-    fig.update_layout(title=chart_title(title), barmode="stack",
+    layout_kwargs = dict(barmode="stack",
                       xaxis=dict(range=[0, 100], title="Percentage"),
                       yaxis=dict(automargin=True), height=chart_h, showlegend=False,
                       margin=chart_margins(title=title))
+    ct = chart_title(title)
+    if ct is not None:
+        layout_kwargs["title"] = ct
+    fig.update_layout(**layout_kwargs)
     return style_fig(fig)
 
 
