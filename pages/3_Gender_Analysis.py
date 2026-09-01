@@ -127,6 +127,7 @@ for g in ["Male", "Female"]:
 fig_app = grouped_bar_chart(
     board_pivot_app.index.tolist(), series_app, title="Students Appeared — Boys vs Girls, per Board",
     y_title="Students Appeared", colors=[GENDER_COLORS["Male"], GENDER_COLORS["Female"]],
+    show_values=True, value_formatter=fmt_k,
 )
 show_chart(fig_app)
 st.markdown("</div>", unsafe_allow_html=True)
@@ -153,6 +154,7 @@ with pc1:
     show_chart(grouped_bar_chart(
         prov_pivot_app.index.tolist(), series_prov_app, title="Appeared — Boys vs Girls, by Province",
         y_title="Students Appeared", colors=[GENDER_COLORS["Male"], GENDER_COLORS["Female"]],
+        show_values=True, value_formatter=fmt_k,
     ))
 with pc2:
     prov_pivot_pct = prov_gender.pivot_table(index="Province", columns="Gender", values="Pass %", aggfunc="mean").reindex(prov_order)
