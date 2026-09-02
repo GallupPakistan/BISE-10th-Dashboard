@@ -861,21 +861,8 @@ def grouped_bar_chart(x, series, title="", y_title="Students", height=400, color
     return style_fig(fig)
 
 
-def radar_chart(labels, values, title="", height=420):
-    if not labels or not values:
-        return None
-    labels_c = list(labels) + [labels[0]]
-    values_c = list(values) + [values[0]]
-    fig = go.Figure(go.Scatterpolar(
-        r=values_c, theta=labels_c, fill="toself",
-        line=dict(color=NAVY, width=2), fillcolor="rgba(15,58,90,0.25)",
-    ))
-    fig.update_layout(title=chart_title(title), height=height,
-                      polar=dict(radialaxis=dict(visible=True, showgrid=True)),
-                      showlegend=False, margin=chart_margins(title=title))
-    return style_fig(fig)
-
-
+def radar_chart_UNUSED_REMOVED():
+    pass
 def board_rank_hbar(labels, values, title="", x_title="Pass %", height=None):
     if not labels or not values:
         return None
