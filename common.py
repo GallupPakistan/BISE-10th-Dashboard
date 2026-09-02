@@ -579,8 +579,9 @@ def pass_fail_hbar(df, label_col, title="", height=None):
                          textposition="inside", insidetextanchor="middle"))
     layout_kwargs = dict(barmode="stack",
                       xaxis=dict(range=[0, 100], title="Percentage"),
-                      yaxis=dict(automargin=True), height=chart_h, showlegend=False,
-                      margin=chart_margins(title=title))
+                      yaxis=dict(automargin=True), height=chart_h, showlegend=True,
+                      legend=legend_top_right(),
+                      margin=chart_margins(title=title, legend_pos="top"))
     ct = chart_title(title)
     if ct is not None:
         layout_kwargs["title"] = ct
