@@ -17,7 +17,7 @@ FAIL_GRADES = {"Fail", "E", "E/No Grade"}
 TOP_GRADES = {"A1", "A+", "A"}
 BOTTOM_GRADES = {"D", "E", "E/No Grade", "Fail"}
 # Best-to-worst grade order used for cumulative ranking
-GRADE_RANK = ["A1", "A+", "A", "B", "C", "D", "E", "Fail", "E/No Grade"]
+GRADE_RANK = ["A1", "A+", "A", "B", "C", "D", "Fail"]
 
 st.set_page_config(page_title="Grade Distribution — BISE Dashboard", page_icon="🎯", layout="wide")
 inject_css()
@@ -107,10 +107,12 @@ st.markdown("</div>", unsafe_allow_html=True)
 
 # 3. CUMULATIVE % LINE — % of students at grade X or better, per board
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
-grade_order_present = [g for g in GRADE_RANK if g in board_grade_pivot.columns]
+board_grade_pivot_c = board_grade_pivot.copy()
+board_grade_pivot_c["Fail"] = board_grade_pivot_c.reindex(columns=list(FAIL_GRADES), fill_value=0).sum(axis=1)
+grade_order_present = [g for g in GRADE_RANK if g in board_grade_pivot_c.columns]
 cum_series = {}
-for b in board_grade_pivot.index:
-    row = board_grade_pivot.loc[b, grade_order_present]
+for b in board_grade_pivot_c.index:
+    row = board_grade_pivot_c.loc[b, grade_order_present]
     cum_pct = (row.cumsum() / board_totals[b] * 100).round(1)
     cum_series[b] = cum_pct.tolist()
 show_chart(cumulative_grade_line_chart(grade_order_present, cum_series, title="Cumulative % of Students by Grade or Better — per Board"))
