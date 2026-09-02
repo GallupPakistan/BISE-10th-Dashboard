@@ -9,7 +9,7 @@ from common import (
     render_global_filters,
     load_boards, show_missing_workbook_error,
     extract_grade_distribution, kpi_card, show_chart,
-    pass_fail_hbar, grouped_bar_chart, board_rank_hbar, cumulative_grade_line_chart,
+    donut_pie, pass_fail_hbar, grouped_bar_chart, cumulative_grade_line_chart,
     PALETTE, csv_download_button, fmt_k, NAVY, TEAL,
 )
 
@@ -135,10 +135,27 @@ for b in board_grade_pivot_c.index:
 show_chart(cumulative_grade_line_chart(grade_order_present, cum_series, title="Cumulative % of Students by Grade or Better — per Board"))
 st.markdown("</div>", unsafe_allow_html=True)
 
-# 4. RANKED BAR — boards sorted by overall pass rate, best to worst
-st.markdown('<div class="section-card">', unsafe_allow_html=True)
-show_chart(board_rank_hbar(board_pass_pct.index.tolist(), board_pass_pct.tolist(), title="Boards Ranked by Pass Rate"))
-st.markdown("</div>", unsafe_allow_html=True)
+# 4. DONUT — grade category share (Top/Average/Below Average), all boards combined
+d1, d2 = st.columns(2)
+with d1:
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    avg_cols = [c for c in board_grade_pivot.columns if c not in TOP_GRADES and c not in BOTTOM_GRADES]
+    avg_sum = int(board_grade_pivot[avg_cols].sum().sum()) if avg_cols else 0
+    cat_labels = ["Top Grades (A1+A++A)", "Average (B+C)", "Below Average (D+Fail)"]
+    cat_values = [int(top_sum.sum()), avg_sum, int(bottom_sum.sum())]
+    show_chart(donut_pie(cat_labels, cat_values, [TEAL, "#F59E0B", "#E74C3C"],
+                         title="Grade Category Share — All Boards Combined"))
+    st.markdown("</div>", unsafe_allow_html=True)
+with d2:
+    # DONUT — which board contributes the most to overall failed students
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    fail_share = board_fail[board_fail > 0].sort_values(ascending=False)
+    if not fail_share.empty:
+        show_chart(donut_pie(fail_share.index.tolist(), fail_share.values.tolist(),
+                             PALETTE[: len(fail_share)], title="Share of Failed Students — by Board"))
+    else:
+        st.info("No failed students in the selected boards/year.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
 st.markdown("**Combined grade table**")
