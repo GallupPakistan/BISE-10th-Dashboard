@@ -63,12 +63,16 @@ pass_count = int(combined.loc[~combined["Grade"].astype(str).isin(FAIL_GRADES), 
 fail_count = int(combined.loc[combined["Grade"].astype(str).isin(FAIL_GRADES), "Count"].sum())
 pass_pct = (pass_count / total * 100) if total else 0
 
-c1, c2 = st.columns(2)
+c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown(kpi_card("TOTAL STUDENTS GRADED", fmt_k(total), "All boards combined", NAVY), unsafe_allow_html=True)
 with c2:
+    st.markdown(kpi_card("OVERALL PASS RATE", f"{pass_pct:.1f}%", f"{fmt_k(pass_count)} passed", TEAL), unsafe_allow_html=True)
+with c3:
     top_grade = combined.sort_values("Count", ascending=False).iloc[0]
-    st.markdown(kpi_card("MOST COMMON GRADE", str(top_grade["Grade"]), f"{fmt_k(int(top_grade['Count']))} students", TEAL), unsafe_allow_html=True)
+    st.markdown(kpi_card("MOST COMMON GRADE", str(top_grade["Grade"]), f"{fmt_k(int(top_grade['Count']))} students", NAVY), unsafe_allow_html=True)
+with c4:
+    st.markdown(kpi_card("TOTAL FAILED", fmt_k(fail_count), f"{100 - pass_pct:.1f}% of total", "#E74C3C"), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -80,6 +84,19 @@ board_totals = all_grades.groupby("Board")["Count"].sum()
 board_fail = all_grades[all_grades["Grade"].astype(str).isin(FAIL_GRADES)].groupby("Board")["Count"].sum().reindex(board_totals.index).fillna(0)
 board_pass = board_totals - board_fail
 board_pass_pct = (board_pass / board_totals * 100).round(1)
+
+best_board = board_pass_pct.idxmax()
+worst_board = board_pass_pct.idxmin()
+
+c5, c6, c7 = st.columns(3)
+with c5:
+    st.markdown(kpi_card("BOARDS COMPARED", str(len(boards_sel)), year_label, NAVY), unsafe_allow_html=True)
+with c6:
+    st.markdown(kpi_card("BEST PERFORMING BOARD", best_board, f"{board_pass_pct[best_board]:.1f}% pass rate", TEAL), unsafe_allow_html=True)
+with c7:
+    st.markdown(kpi_card("WEAKEST PERFORMING BOARD", worst_board, f"{board_pass_pct[worst_board]:.1f}% pass rate", "#E74C3C"), unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 # 1. STACKED BAR — passed vs failed per board (scale + performance together)
 st.markdown('<div class="section-card">', unsafe_allow_html=True)
