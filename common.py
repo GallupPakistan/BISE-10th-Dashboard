@@ -842,7 +842,7 @@ def stacked_area_chart(pivot_df, title="", y_title="Appeared", height=420):
 
 
 def grouped_bar_chart(x, series, title="", y_title="Students", height=400, colors=None,
-                      show_values=False, value_suffix="", value_formatter=None):
+                      show_values=False, value_suffix=""):
     if x is None or len(x) == 0:
         return None
     fig = go.Figure()
@@ -850,14 +850,60 @@ def grouped_bar_chart(x, series, title="", y_title="Students", height=400, color
     for i, (name, values) in enumerate(series.items()):
         bar_kwargs = dict(x=x, y=values, name=name, marker_color=palette[i % len(palette)])
         if show_values:
-            if value_formatter:
-                bar_kwargs["text"] = [value_formatter(v) for v in values]
-            else:
-                bar_kwargs["text"] = [f"{v:.1f}{value_suffix}" for v in values]
+            bar_kwargs["text"] = [f"{v:.1f}{value_suffix}" for v in values]
             bar_kwargs["textposition"] = "outside"
         fig.add_trace(go.Bar(**bar_kwargs))
     fig.update_layout(title=chart_title(title), barmode="group",
                       xaxis=dict(automargin=True), yaxis=dict(title=y_title),
+                      height=height, legend=legend_top_right(),
+                      margin=chart_margins(title=title, legend_pos="top"))
+    return style_fig(fig)
+
+
+def radar_chart(labels, values, title="", height=420):
+    if not labels or not values:
+        return None
+    labels_c = list(labels) + [labels[0]]
+    values_c = list(values) + [values[0]]
+    fig = go.Figure(go.Scatterpolar(
+        r=values_c, theta=labels_c, fill="toself",
+        line=dict(color=NAVY, width=2), fillcolor="rgba(15,58,90,0.25)",
+    ))
+    fig.update_layout(title=chart_title(title), height=height,
+                      polar=dict(radialaxis=dict(visible=True, showgrid=True)),
+                      showlegend=False, margin=chart_margins(title=title))
+    return style_fig(fig)
+
+
+def board_rank_hbar(labels, values, title="", x_title="Pass %", height=None):
+    if not labels or not values:
+        return None
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    labels_s = [labels[i] for i in order]
+    values_s = [values[i] for i in order]
+    chart_h = height or max(280, 42 * len(labels_s))
+    fig = go.Figure(go.Bar(
+        x=values_s, y=labels_s, orientation="h",
+        marker=dict(color=values_s, colorscale=[[0, FAIL_COLOR], [0.5, NAVY_LIGHT], [1, PASS_COLOR]]),
+        text=[f"{v:.1f}%" for v in values_s], textposition="outside",
+    ))
+    fig.update_layout(title=chart_title(title), xaxis=dict(range=[0, 105], title=x_title),
+                      yaxis=dict(automargin=True), height=chart_h, showlegend=False,
+                      margin=chart_margins(title=title, extra_right=40))
+    return style_fig(fig)
+
+
+def cumulative_grade_line_chart(grade_order, series, title="", height=440):
+    if not grade_order or not series:
+        return None
+    fig = go.Figure()
+    for i, (name, values) in enumerate(series.items()):
+        fig.add_trace(go.Scatter(
+            x=grade_order, y=values, mode="lines+markers", name=str(name),
+            line=dict(width=2, color=PALETTE[i % len(PALETTE)]),
+        ))
+    fig.update_layout(title=chart_title(title), xaxis=dict(title="Grade (best → worst)"),
+                      yaxis=dict(title="Cumulative % of students", range=[0, 105]),
                       height=height, legend=legend_top_right(),
                       margin=chart_margins(title=title, legend_pos="top"))
     return style_fig(fig)
