@@ -893,7 +893,7 @@ def board_rank_hbar(labels, values, title="", x_title="Pass %", height=None):
     return style_fig(fig)
 
 
-def cumulative_grade_line_chart(grade_order, series, title="", height=440):
+def cumulative_grade_line_chart(grade_order, series, title="", height=460):
     if not grade_order or not series:
         return None
     fig = go.Figure()
@@ -902,10 +902,15 @@ def cumulative_grade_line_chart(grade_order, series, title="", height=440):
             x=grade_order, y=values, mode="lines+markers", name=str(name),
             line=dict(width=2, color=PALETTE[i % len(PALETTE)]),
         ))
-    fig.update_layout(title=chart_title(title), xaxis=dict(title="Grade (best → worst)"),
-                      yaxis=dict(title="Cumulative % of students", range=[0, 105]),
-                      height=height, legend=legend_top_right(),
-                      margin=chart_margins(title=title, legend_pos="top"))
+    n_series = len(series)
+    fig.update_layout(
+        title=chart_title(title),
+        xaxis=dict(title="Grade (best → worst)"),
+        yaxis=dict(title="Cumulative % of students", range=[0, 108]),
+        height=height + (24 * (n_series // 4)),
+        legend=legend_bottom_clear(extra_rows=n_series // 4),
+        margin=chart_margins(title=title, legend_pos="bottom_multi"),
+    )
     return style_fig(fig)
 
 
