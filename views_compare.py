@@ -96,9 +96,8 @@ def render_compare_page(boards, board_map, selected_names, year):
         gender_colors = [GENDER_COLORS.get(c, NAVY) for c in pivot.columns]
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("👥 Gender Pass % Comparison")
-                show_chart(grouped_bar_chart(pivot.index.tolist(), {col: pivot[col].round(1).tolist() for col in pivot.columns},
-                                      "Pass % by Gender — Selected Boards", y_title="Pass %", colors=gender_colors,
-                                      show_values=True, value_suffix="%"))
+        show_chart(grouped_bar_chart(pivot.index.tolist(), {col: pivot[col].round(1).tolist() for col in pivot.columns},
+                                      "Pass % by Gender — Selected Boards", y_title="Pass %", colors=gender_colors))
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
