@@ -8,7 +8,7 @@ from common import (
     inject_css, render_hero_banner, render_sidebar_brand, render_currently_viewing,
     render_global_filters,
     load_boards, show_missing_workbook_error,
-    extract_subject_data, kpi_card, show_chart, subject_pass_hbar,
+    extract_subject_data, merge_similar_subjects, kpi_card, show_chart, subject_pass_hbar,
     bubble_scatter_chart, treemap_chart,
     csv_download_button, fmt_k, NAVY, TEAL,
 )
@@ -55,22 +55,10 @@ all_subj = pd.concat(frames, ignore_index=True)
 all_subj["Appeared"] = pd.to_numeric(all_subj["Appeared"], errors="coerce")
 all_subj["Passed"] = pd.to_numeric(all_subj["Passed"], errors="coerce")
 
-# ── Merge duplicate subject names that only differ by casing/spacing ───────
-# The source sheets spell the same subject inconsistently across boards
-# (e.g. "Wood Work" vs "WOOD WORK (FURNITURE MAKING)" is a genuinely different
-# subject, but "Tailoring" vs "TAILORING" and "Embroidery" vs "EMBORIDERY"
-# are the same subject typed differently) — normalizing on stripped-upper
-# text merges the latter without inventing any numbers.
-all_subj["Subject"] = all_subj["Subject"].astype(str).str.strip()
-all_subj["SubjectKey"] = all_subj["Subject"].str.upper()
-# Keep the most common original casing as the display label for each key.
-_display_names = all_subj.groupby("SubjectKey")["Subject"].agg(lambda s: s.value_counts().idxmax())
-all_subj["Subject"] = all_subj["SubjectKey"].map(_display_names)
-
-combined = all_subj.groupby("Subject", as_index=False).agg(
-    Appeared=("Appeared", "sum"), Passed=("Passed", "sum")
-)
-combined["Pass %"] = (100 * combined["Passed"] / combined["Appeared"].replace(0, float('nan'))).round(1)
+# ── Merge duplicate subject names (casing, "(Compulsory)" qualifier, known
+#    spelling variants) — same logic the Overview page's subject widget uses,
+#    so the two views never disagree on the same subject's totals. ─────────
+combined = merge_similar_subjects(all_subj)
 combined = combined.sort_values("Pass %", ascending=False)
 
 # ── Minimum-appeared filter ──────────────────────────────────────────────────
