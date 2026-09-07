@@ -20,6 +20,7 @@ from data_loader import (
     extract_grade_distribution,
     extract_stream_summary,
     extract_subject_data,
+    merge_similar_subjects,
     extract_subject_group_data,
     extract_type_from_pass_percentage,
     extract_type_from_yoy,
@@ -192,7 +193,7 @@ def render_gender_type_flow(board_name, year_label, totals, gender_df, type_df):
             failed = max(appeared - passed, 0)
             pct = round(100 * passed / appeared, 1) if appeared else 0
             color = GENDER_COLORS.get(lbl, NAVY)
-            node = _tnode(lbl, fmt_k(appeared), f"{pct:.0f}%", color)
+            node = _tnode(lbl, fmt_k(appeared), f"{pct:.0f}% pass", color)
             gender_kids.append(_subtree(node, _leaf_pair(appeared, passed, failed, pct, round(100 - pct, 1))))
         branches.append(_subtree(_tnode("Total by Gender", fmt_k(g_total), "", NAVY_LIGHT), gender_kids))
 
@@ -208,7 +209,7 @@ def render_gender_type_flow(board_name, year_label, totals, gender_df, type_df):
             failed = max(appeared - passed, 0)
             pct = round(100 * passed / appeared, 1) if appeared else 0
             color = ACCENT if "regular" in str(lbl).lower() else "#8B5CF6"
-            node = _tnode(lbl, fmt_k(appeared), f"{pct:.0f}%", color)
+            node = _tnode(lbl, fmt_k(appeared), f"{pct:.0f}% pass", color)
             type_kids.append(_subtree(node, _leaf_pair(appeared, passed, failed, pct, round(100 - pct, 1))))
         branches.append(_subtree(_tnode("Total by Type", fmt_k(t_total), "", "#0B2763"), type_kids))
 
