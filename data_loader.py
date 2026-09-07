@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import pandas as pd
+import numpy as np
 import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -369,7 +370,7 @@ def group_by_board(sheets: dict):
 
 
 def numeric_grade_columns(df: pd.DataFrame):
-    known = {"A1", "A", "A-1", "A+", "B", "C", "D", "E", "E/NO GRADE", "F", "FAIL"}
+    known = {"A1", "A-I", "A", "A-1", "A+", "B", "C", "D", "E", "E/NO GRADE", "F", "FAIL"}
     return [c for c in df.columns if str(c).strip().upper() in known]
 
 
@@ -1381,6 +1382,106 @@ def _extract_fsd_style_subject_sheet(board_sheets: dict, year):
     return None, None
 
 
+# ── Subject-name canonicalization ───────────────────────────────────────────
+# The same subject is spelled differently across boards' sheets: casing
+# ("english" vs "ENGLISH"), a "(Compulsory)" qualifier that some boards add
+# and others don't (there is no separate "elective" version of Pakistan
+# Studies/English/Urdu at SSC level, so the qualifier never marks a genuinely
+# different subject), and outright spelling variants for a few Islamic-studies
+# papers (e.g. "Mutala-e-Quran-e-Hakeem" spelled 3+ different ways). Left
+# unmerged, these fragment one subject's totals across several rows, making
+# "Subject-wise Pass %" undercount how many students actually appeared.
+_SUBJECT_ALIAS_GROUPS = [
+    ["MUTALA E QURAN HAKEEM", "MUTALIAE QURAN E HAKEEM", "MUTALIA E QURAN E HAKEEM",
+     "MUTALIAE QURAN-E-HAKEEM", "MUTALIA-E-QURAN-E-HAKEEM", "MUTALIAE-QURAN-E-HAKEEM"],
+    ["TRANSLATION OF HOLY QURAN", "TRANSLATION OF THE HOLY QURAN"],
+    ["MATHEMATICS", "MATHS", "MATH"],
+    ["COMPUTER SCIENCE", "COMPUTER SCIENCES"],
+]
+_SUBJECT_ALIAS_MAP = {}
+for _group in _SUBJECT_ALIAS_GROUPS:
+    _canon = _group[0]
+    for _variant in _group:
+        _SUBJECT_ALIAS_MAP[_variant] = _canon
+
+
+def _canonical_subject_key(name: str) -> str:
+    """Uppercase, whitespace/punctuation-normalized key used to merge subject
+    rows that are the same subject spelled differently across boards."""
+    key = str(name).strip().upper()
+    key = re.sub(r"\s*\(\s*COMPULSORY\s*\)\s*", "", key)
+    key = re.sub(r"\s*\(\s*COMP\.?\s*\)\s*", "", key)
+    key = re.sub(r"\bCOMPULSORY\b", "", key)
+    key = re.sub(r"[-_]", " ", key)
+    # Boards often split a subject into Part-I / Part-II (9th + 10th class
+    # papers) and report each half as its own row — e.g. "English-I" and
+    # "English-II" — which otherwise show up as two separate subjects with
+    # smaller, misleading counts instead of one combined "English" total.
+    key = re.sub(r"\bPART\s*[-]?\s*(I{1,3}|IV|1|2|3|4)\s*$", "", key)
+    key = re.sub(r"\s+(I{1,3}|IV)\s*$", "", key)
+    key = re.sub(r"\bTHE\b", "", key)
+    key = re.sub(r"\s+", " ", key).strip()
+    key = _SUBJECT_ALIAS_MAP.get(key, key)
+    return key
+
+
+def merge_similar_subjects(df: pd.DataFrame, subject_col: str = "Subject") -> pd.DataFrame:
+    """Collapse rows whose Subject only differs by casing, a '(Compulsory)'
+    qualifier, or a known spelling variant, summing Appeared/Passed and
+    recomputing Pass %. Use this on every subject-wise aggregation so the
+    Overview widget and the full Subject Analysis page never disagree."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    out[subject_col] = out[subject_col].astype(str).str.strip()
+    out["_subject_key"] = out[subject_col].map(_canonical_subject_key)
+    # Keep the most common original spelling (by appeared-weighted frequency)
+    # as the display label for each merged key, preferring the shorter,
+    # unqualified form (e.g. "Pakistan Studies" over "Pakistan Studies
+    # (Compulsory)", and "English" over "English-II") when counts tie —
+    # and even when they don't, a bare Part-I/II label would misleadingly
+    # look like only half the subject's real, now-merged total.
+    if "Appeared" in out.columns:
+        weight = pd.to_numeric(out["Appeared"], errors="coerce").fillna(0)
+    else:
+        weight = pd.Series(1, index=out.index)
+    has_part_suffix = out[subject_col].str.contains(r"[-\s](?:I{1,3}|IV)\s*$", case=False, regex=True, na=False)
+    label_scores = (
+        out.assign(_w=weight, _has_suffix=has_part_suffix)
+        .groupby(["_subject_key", subject_col])[["_w", "_has_suffix"]]
+        .agg({"_w": "sum", "_has_suffix": "first"})
+        .reset_index()
+        .sort_values(["_subject_key", "_has_suffix", "_w"], ascending=[True, True, False])
+    )
+    display_names = label_scores.drop_duplicates("_subject_key").set_index("_subject_key")[subject_col]
+    out[subject_col] = out["_subject_key"].map(display_names)
+    # If every raw spelling for a merged subject carried a Part-I/II suffix
+    # (e.g. a board that only ever reports "English-I"/"English-II", never a
+    # combined "English" line) and/or a "(Compulsory)" qualifier, strip them
+    # from the label we show too — the rows are already summed into one
+    # total, so a lingering "-II" would wrongly suggest this is only half
+    # the subject's real count.
+    out[subject_col] = (
+        out[subject_col]
+        .str.replace(r"\s*\(\s*compulsory\s*\)\s*", "", regex=True, case=False)
+        .str.replace(r"\s*\(\s*comp\.?\s*\)\s*", "", regex=True, case=False)
+        .str.replace(r"[-\s](I{1,3}|IV)\s*$", "", regex=True, case=False)
+        .str.replace(r"\s+", " ", regex=True)
+        .str.strip()
+    )
+
+    agg = {}
+    if "Appeared" in out.columns:
+        agg["Appeared"] = "sum"
+    if "Passed" in out.columns:
+        agg["Passed"] = "sum"
+    merged = out.groupby(subject_col, as_index=False).agg(agg)
+    if "Appeared" in merged.columns and "Passed" in merged.columns:
+        appeared_safe = pd.to_numeric(merged["Appeared"], errors="coerce").replace(0, np.nan)
+        merged["Pass %"] = (100 * merged["Passed"] / appeared_safe).round(1)
+    return merged
+
+
 def extract_subject_data(board_sheets: dict, year=None) -> pd.DataFrame:
     df = _pick_sheet(board_sheets, ["Subject-wise Pass %", "Subject-wise"])
     if df is None or df.empty:
@@ -1480,21 +1581,33 @@ def extract_district_data(board_sheets: dict, year=None) -> pd.DataFrame:
         year = sheet_year if year is None else year
 
     df = _coerce_numeric(filter_df_year(df, year))
-    district_col = find_col(df, "District")
-    category_col = find_col(df, "Category")
+    district_col = find_col(df, "District", "Area")
+    category_col = find_col(df, "Category", "Institute Type")
     row_type_col = find_col(df, "Row_Type", "Row Type")
     appeared_col = find_col(df, "Total Appeared", "Total_Appeared", "Appeared")
-    passed_col = find_col(df, "Total Passed", "Total_Passed", "Passed", "Total Pass")
-    failed_col = find_col(df, "Failed")
-    pass_col = find_col(df, "Total Pass Pct", "Total_Pass_Pct", "Total Pass %", "Pass %", "Pass%", "Total %")
+    passed_col = find_col(df, "Total Passed", "Total_Passed", "Passed", "Total Pass", "Pass")
+    failed_col = find_col(df, "Failed", "Fail")
+    pass_col = find_col(df, "Total Pass Pct", "Total_Pass_Pct", "Total Pass %", "Pass %", "Pass%", "Total %", "Pass_Pct")
 
     if district_col is None:
         return pd.DataFrame(columns=["District", "Appeared", "Passed", "Failed", "Pass %"])
 
+    # Some sheets (e.g. Sargodha) list each district's Govt/NonGovt/Private
+    # split AND a pre-aggregated "Total" row for the same district. If a
+    # district already has its own "Total" row, that's the one figure we
+    # want (one bar per district) — the Govt/NonGovt/Private breakdown rows
+    # must be skipped, or the district's Appeared count gets double-counted.
+    districts_with_total_row = set()
+    if category_col:
+        for _, r in df.iterrows():
+            cat = str(r.get(category_col, "")).strip().lower()
+            if cat == "total":
+                districts_with_total_row.add(str(r[district_col]).strip())
+
     rows = []
     for _, r in df.iterrows():
         district = str(r[district_col]).strip()
-        if not district or district.lower() in ("total", "grand total", "overall"):
+        if not district or district.lower() in ("total", "grand total", "overall", "all areas"):
             continue
         if row_type_col and pd.notna(r.get(row_type_col)):
             rt = str(r[row_type_col]).strip().lower()
@@ -1508,6 +1621,11 @@ def extract_district_data(board_sheets: dict, year=None) -> pd.DataFrame:
         category = str(r[category_col]).strip() if category_col and pd.notna(r.get(category_col)) else "All"
         if category.lower() == "total":
             category = "All"
+        elif district in districts_with_total_row:
+            # This district already has its own pre-aggregated Total row —
+            # skip the Govt/NonGovt/Private breakdown rows to avoid
+            # double-counting and duplicate bars for the same district.
+            continue
 
         appeared = pd.to_numeric(r.get(appeared_col), errors="coerce") if appeared_col else None
         passed = pd.to_numeric(r.get(passed_col), errors="coerce") if passed_col else None
@@ -1533,7 +1651,11 @@ def extract_district_data(board_sheets: dict, year=None) -> pd.DataFrame:
 
     out = pd.DataFrame(rows)
     if not out.empty:
-        if year is None:
+        # Some sheets (e.g. FBISE's area/region table) report several "Detail"
+        # rows per district/area — split out by candidate type, group, gender —
+        # rather than one pre-aggregated row. Always collapse to one row per
+        # district so multi-row areas aren't shown as duplicate/fragmented bars.
+        if out["District"].duplicated().any():
             out = out.groupby("District", as_index=False)[["Appeared", "Passed", "Failed"]].sum()
             out["Pass %"] = (100 * out["Passed"] / out["Appeared"].replace(0, pd.NA)).round(1)
         out = out.sort_values("Pass %", ascending=True)
@@ -1792,8 +1914,42 @@ def extract_grade_distribution(board_sheets: dict, year=None) -> pd.DataFrame:
             "Gender-wise",
         ],
     )
+    result = None
     if df is not None and not df.empty:
         df = _coerce_numeric(filter_df_year(df, year))
+        # This is the SSC 10th-class dashboard — some boards (e.g. Swat) publish
+        # 9th and 10th class rows side by side in the same sheet/year; without
+        # filtering to 10th only, a "2026" pull silently doubles up with 9th
+        # class candidates from the same year.
+        exam_class_col = find_col(df, "Exam Class", "Class")
+        if exam_class_col:
+            is_10th = df[exam_class_col].astype(str).str.strip().str.contains(r"10", na=False)
+            if is_10th.any():
+                df = df[is_10th]
+        # Some sheets (e.g. Faisalabad) carry an explicit Row_Type column
+        # marking "Detail" rows vs their own rolled-up "District Total" /
+        # "Grand Total" rows in the same table. Keep only the Detail rows —
+        # otherwise the subtotal rows double the count on top of the detail
+        # rows they already summarize.
+        row_type_col = find_col(df, "Row_Type", "Row Type")
+        if row_type_col:
+            is_detail = df[row_type_col].astype(str).str.strip().str.lower().isin(["detail", "", "nan"])
+            if is_detail.any():
+                df = df[is_detail]
+        # Some sheets (e.g. Sahiwal, Swat) break rows down by Category/Group/Gender
+        # AND include their own subtotal/grand-total rows (e.g. Gender="TOTAL",
+        # Category="SUB TOTAL"/"GRAND TOTAL") mixed in with the per-group detail
+        # rows. Summing every row then counts each student several times over.
+        # Drop any row where a breakdown column reads as a subtotal marker,
+        # provided that still leaves at least one row to work with.
+        breakdown_cols = [c for c in (find_col(df, "Category"), find_col(df, "Group"), find_col(df, "Gender")) if c]
+        if breakdown_cols:
+            total_markers = {"total", "overall", "all", "grand total", "sub total", "subtotal"}
+            mask = pd.Series(True, index=df.index)
+            for c in breakdown_cols:
+                mask &= ~df[c].astype(str).str.strip().str.lower().isin(total_markers)
+            if mask.any():
+                df = df[mask]
         grade_cols = numeric_grade_columns(df)
         if grade_cols:
             fail_col = find_col(df, "Fail", "Failed", "F")
@@ -1803,11 +1959,110 @@ def extract_grade_distribution(board_sheets: dict, year=None) -> pd.DataFrame:
             totals = df[cols].apply(pd.to_numeric, errors="coerce").sum()
             totals = totals[totals > 0]
             if not totals.empty:
-                return pd.DataFrame({"Grade": totals.index.astype(str), "Count": totals.values.astype(int)})
+                result = pd.DataFrame({"Grade": totals.index.astype(str), "Count": totals.values.astype(int)})
+                # Normalize spelling variants so downstream charts that key off
+                # exact grade names (e.g. "A1" in the Top/Bottom-grade and
+                # cumulative-rank charts) recognize this board's column too.
+                result["Grade"] = result["Grade"].replace({"A-I": "A1", "A-1": "A1"})
+                # "E" is genuinely the lowest FAILING grade on some boards but
+                # the lowest PASSING grade on others (no separate "Fail"
+                # column at all) — the label alone can't tell us which. If
+                # the sheet also publishes its own "Passed" count, use it as
+                # ground truth: if E has to be included in the grade columns
+                # to match the published Passed total, it's a passing grade
+                # here, so rename it to avoid being swept into "Fail" by any
+                # downstream chart that treats a bare "E" as a fail grade.
+                e_col = find_col(df, "E")
+                passed_col = find_col(df, "Passed", "Pass")
+                if e_col and not fail_col and passed_col:
+                    non_e_cols = [c for c in grade_cols if c != e_col]
+                    sum_passed_raw = pd.to_numeric(df[passed_col], errors="coerce").sum()
+                    sum_incl_e = df[cols].apply(pd.to_numeric, errors="coerce").sum().sum()
+                    sum_excl_e = df[non_e_cols].apply(pd.to_numeric, errors="coerce").sum().sum() if non_e_cols else 0
+                    if sum_passed_raw > 0 and abs(sum_incl_e - sum_passed_raw) < abs(sum_excl_e - sum_passed_raw):
+                        result.loc[result["Grade"] == "E", "Grade"] = "E (Pass)"
 
-    # Fallback for boards whose grade data isn't in a dedicated sheet (e.g. BISE Lahore,
-    # where it's embedded in per-year "Candidates Sta" sheets instead).
-    return _extract_grade_dist_from_candidates_sta(board_sheets, year)
+    if result is None:
+        # Fallback for boards whose grade data isn't in a dedicated sheet (e.g. BISE Lahore,
+        # where it's embedded in per-year "Candidates Sta" sheets instead).
+        result = _extract_grade_dist_from_candidates_sta(board_sheets, year)
+
+    if result is None or result.empty:
+        return result
+
+    # Many boards' grade sheets only list bands for students who PASSED
+    # (A1/A/B/C/D) and don't publish a genuine "Fail" count at all — so the
+    # grade total silently equals the passed count, not appeared. Reconcile
+    # against the board's real Appeared/Passed totals and top up (or add) a
+    # "Fail" bucket so charts built on this table (Passed vs Failed, grade
+    # category share, etc.) don't show a misleadingly ~100%-passed picture.
+    fail_labels = {"Fail", "E", "E/No Grade"}
+    sum_grades = float(result["Count"].sum())
+    try:
+        board_totals = extract_board_totals(board_sheets, year)
+        true_appeared = board_totals.get("appeared", 0) or 0
+    except Exception:
+        true_appeared = 0
+    if true_appeared:
+        missing = true_appeared - sum_grades
+        if missing > max(5, 0.005 * true_appeared):
+            is_fail_row = result["Grade"].astype(str).isin(fail_labels)
+            existing_fail = float(result.loc[is_fail_row, "Count"].sum()) if is_fail_row.any() else 0.0
+            # Two different situations produce a shortfall here:
+            #  (a) the sheet never published a Fail count at all (existing
+            #      Fail ≈ 0) — the whole gap IS the missing Fail bucket.
+            #  (b) the sheet already has a real, non-trivial Fail column but
+            #      only covers *some* districts/categories (e.g. Faisalabad's
+            #      district table), so the gap is students missing from the
+            #      table entirely, of unknown Pass/Fail split — and the
+            #      covered rows' own pass rate can differ from the board's
+            #      overall rate. Solve for exactly how many of the missing
+            #      students must be Pass vs Fail so the *combined* total
+            #      lands on the board's real, published Pass %, rather than
+            #      assuming the uncovered slice matches the overall rate
+            #      (which would double-count the covered slice's own skew).
+            true_pass_pct = board_totals.get("pass_pct") if true_appeared else None
+            looks_like_real_fail_tracking = sum_grades > 0 and (existing_fail / sum_grades) > 0.03
+            if looks_like_real_fail_tracking and true_pass_pct is not None:
+                current_passed = sum_grades - existing_fail
+                target_passed = true_appeared * true_pass_pct / 100
+                passed_topup = target_passed - current_passed
+                fail_topup = missing - passed_topup
+                if is_fail_row.any():
+                    exact_fail = result["Grade"].astype(str) == "Fail"
+                    target = exact_fail if exact_fail.any() else is_fail_row
+                    fail_idx = result.index[target][0]
+                    result.loc[fail_idx, "Count"] = result.loc[fail_idx, "Count"] + int(round(fail_topup))
+                else:
+                    result = pd.concat(
+                        [result, pd.DataFrame({"Grade": ["Fail"], "Count": [int(round(fail_topup))]})],
+                        ignore_index=True,
+                    )
+                pass_rows = result[~result["Grade"].astype(str).isin(fail_labels)]
+                if not pass_rows.empty:
+                    biggest_idx = pass_rows["Count"].idxmax()
+                    result.loc[biggest_idx, "Count"] = result.loc[biggest_idx, "Count"] + int(round(passed_topup))
+                elif passed_topup > 0:
+                    result = pd.concat(
+                        [result, pd.DataFrame({"Grade": ["Pass (ungraded)"], "Count": [int(round(passed_topup))]})],
+                        ignore_index=True,
+                    )
+                result["Count"] = result["Count"].clip(lower=0)
+            elif is_fail_row.any():
+                # Prefer the row literally named "Fail" as the one bucket to
+                # top up; if several fail-label rows exist (e.g. both "E" and
+                # "Fail" columns), add the shortfall to only one of them —
+                # adding it to every matching row would double-count it.
+                exact_fail = result["Grade"].astype(str) == "Fail"
+                target = exact_fail if exact_fail.any() else is_fail_row
+                first_idx = result.index[target][0]
+                result.loc[first_idx, "Count"] = result.loc[first_idx, "Count"] + int(missing)
+            else:
+                result = pd.concat(
+                    [result, pd.DataFrame({"Grade": ["Fail"], "Count": [int(missing)]})],
+                    ignore_index=True,
+                )
+    return result
 
 
 def extract_stream_summary(demo_df: pd.DataFrame) -> pd.DataFrame:
@@ -1894,6 +2149,7 @@ __all__ = [
     "extract_board_totals",
     "extract_subject_group_data",
     "extract_subject_data",
+    "merge_similar_subjects",
     "extract_district_data",
     "get_master_summary",
     "get_board_appeared_table",
