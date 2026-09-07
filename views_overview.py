@@ -339,8 +339,7 @@ def render_overview(boards, board_map, year, boards_sel=None):
         all_subj = pd.concat(subj_rows, ignore_index=True)
         all_subj["Appeared"] = pd.to_numeric(all_subj["Appeared"], errors="coerce")
         all_subj["Passed"] = pd.to_numeric(all_subj["Passed"], errors="coerce")
-        agg = all_subj.groupby("Subject", as_index=False)[["Appeared", "Passed"]].sum()
-        agg["Pass %"] = (100 * agg["Passed"] / agg["Appeared"].replace(0, np.nan)).round(2)
+        agg = merge_similar_subjects(all_subj)
         top = agg.sort_values("Appeared", ascending=False).head(15).sort_values("Pass %")
         fig = go.Figure(go.Bar(x=top["Pass %"], y=top["Subject"], orientation="h", marker_color=ACCENT,
                                 text=top["Pass %"], texttemplate="%{text:.1f}%", textposition="outside"))
@@ -414,5 +413,3 @@ def render_overview(boards, board_map, year, boards_sel=None):
     st.dataframe(rankings, use_container_width=True, hide_index=True)
     csv_download_button(rankings, "⬇️ Download rankings CSV", "all_boards_rankings.csv")
     st.markdown("</div>", unsafe_allow_html=True)
-
-
