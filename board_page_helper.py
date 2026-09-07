@@ -33,6 +33,7 @@ from common import (
     extract_groupwise_type,
     build_subject_year_trend,
     get_master_summary,
+    merge_similar_subjects,
 )
 from views_board import render_board_page
 
@@ -100,11 +101,20 @@ def render_single_board_page(display_name: str):
         subj_trend_raw = subj_trend_raw.copy()
         subj_trend_raw["Board"] = display_name
 
+    # Merge Part-I/Part-II and casing/spelling variants of the same subject
+    # (e.g. "English-I" + "English-II", "MATHS" + "Mathematics") so a single
+    # board's subject chart doesn't fragment one subject into several bars —
+    # the same normalization already used on the Overview and Subject
+    # Analysis pages, so per-board and cross-board views agree.
+    subject_data = merge_similar_subjects(extract_subject_data(board_sheets, year))
+    if subject_data is None:
+        subject_data = pd.DataFrame(columns=["Subject", "Appeared", "Passed", "Pass %"])
+
     render_board_page(
         display_name, board_sheets, year, year_label,
         demo_df, gender_df, type_df, totals,
         extract_subject_group_data(board_sheets, year),
-        extract_subject_data(board_sheets, year),
+        subject_data,
         extract_district_data(board_sheets, year),
         extract_yearly_trend(board_sheets, board_prefix=prefix),
         extract_grade_distribution(board_sheets, year),
