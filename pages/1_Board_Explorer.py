@@ -35,6 +35,7 @@ from common import (
     build_subject_year_trend,
     get_master_summary,
     BOARD_PROVINCE,
+    merge_similar_subjects,
 )
 from views_board import render_board_page
 
@@ -168,11 +169,15 @@ for selected_board_name in selected_boards:
             subj_trend_raw = subj_trend_raw.copy()
             subj_trend_raw["Board"] = selected_board_name
 
+        subject_data = merge_similar_subjects(extract_subject_data(board_sheets, year))
+        if subject_data is None:
+            subject_data = pd.DataFrame(columns=["Subject", "Appeared", "Passed", "Pass %"])
+
         render_board_page(
             selected_board_name, board_sheets, year, year_label,
             demo_df, gender_df, type_df, totals,
             extract_subject_group_data(board_sheets, year),
-            extract_subject_data(board_sheets, year),
+            subject_data,
             extract_district_data(board_sheets, year),
             extract_yearly_trend(board_sheets, board_prefix=prefix),
             extract_grade_distribution(board_sheets, year),
