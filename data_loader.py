@@ -1354,6 +1354,27 @@ def _pick_punjab_year_sheet(board_sheets: dict, year, kind: str):
     return None, None
 
 
+def _punjab_year_sheet_years(board_sheets: dict, kind: str):
+    """All years for which a matching year-specific Punjab sheet actually
+    exists (used to aggregate "All Years" instead of silently picking just
+    the latest one)."""
+    keys = {"subject": ("subject", "pass"), "district": ("district", "pass")}
+    need = keys.get(kind, ())
+    years = sorted(get_available_years(board_sheets) or _years_from_sheet_names(board_sheets))
+    found = []
+    for y in years:
+        ys = str(y)
+        for label in board_sheets:
+            ll = label.lower()
+            if ys not in label or not all(k in ll for k in need):
+                continue
+            if kind == "subject" and re.search(r"part\s*-?\s*i\b", ll) and "part-ii" not in ll and "part ii" not in ll:
+                continue
+            found.append(y)
+            break
+    return found
+
+
 def _extract_fsd_style_subject_sheet(board_sheets: dict, year):
     """Faisalabad's 'Subjects' sheet is long-format: Year, Candidate_Type,
     Part, Subject_Name, Enroll, Absent, Appear, Pass, Pass_Pct. Collapse
@@ -1368,7 +1389,19 @@ def _extract_fsd_style_subject_sheet(board_sheets: dict, year):
     pass_col = find_col(df, "Pass")
     if ycol is None or subj_col is None or appear_col is None or pass_col is None:
         return None, None
-    years = [year] if year else sorted(pd.to_numeric(df[ycol], errors="coerce").dropna().astype(int).unique().tolist())
+    all_years = sorted(pd.to_numeric(df[ycol], errors="coerce").dropna().astype(int).unique().tolist())
+    years = [year] if year else all_years
+    if year is None and len(all_years) > 1:
+        # "All Years" must combine every year's rows, not just the latest —
+        # summing here (rather than returning on the first match below) is
+        # what makes that happen.
+        yd = df[pd.to_numeric(df[ycol], errors="coerce").isin(all_years)]
+        agg = yd.groupby(subj_col, as_index=False)[[appear_col, pass_col]].sum()
+        agg = agg.rename(columns={subj_col: "Subject", appear_col: "Appeared", pass_col: "Passed"})
+        agg["Appeared"] = pd.to_numeric(agg["Appeared"], errors="coerce")
+        agg["Passed"] = pd.to_numeric(agg["Passed"], errors="coerce")
+        agg["Pass %"] = (100 * agg["Passed"] / agg["Appeared"].replace(0, float("nan"))).round(2)
+        return agg, None
     for y in reversed(years):
         yd = df[pd.to_numeric(df[ycol], errors="coerce") == y]
         if yd.empty:
@@ -1561,6 +1594,18 @@ def merge_similar_subjects(df: pd.DataFrame, subject_col: str = "Subject") -> pd
 def extract_subject_data(board_sheets: dict, year=None) -> pd.DataFrame:
     df = _pick_sheet(board_sheets, ["Subject-wise Pass %", "Subject-wise"])
     if df is None or df.empty:
+        # Boards like Lahore/Bahawalpur/Gujranwala publish a SEPARATE sheet
+        # per year (no shared sheet with a Year column), instead of one
+        # combined sheet. "All Years" must aggregate every year's sheet —
+        # picking just the latest one and calling it "All Years" would
+        # silently understate the true multi-year totals.
+        if year is None:
+            available_years = _punjab_year_sheet_years(board_sheets, "subject")
+            if len(available_years) > 1:
+                per_year = [extract_subject_data(board_sheets, y) for y in available_years]
+                per_year = [d for d in per_year if d is not None and not d.empty]
+                if per_year:
+                    return merge_similar_subjects(pd.concat(per_year, ignore_index=True))
         df, sheet_year = _pick_punjab_year_sheet(board_sheets, year, "subject")
         if df is None:
             df, sheet_year = _extract_fsd_style_subject_sheet(board_sheets, year)
@@ -1574,7 +1619,12 @@ def extract_subject_data(board_sheets: dict, year=None) -> pd.DataFrame:
         return pd.DataFrame(columns=["Subject", "Appeared", "Passed", "Pass %"])
 
     ycol = find_col(df, "Year")
-    if ycol and year is not None:
+    if ycol:
+        # Always run this — filter_df_year also drops 9th-class rows (for
+        # boards that publish both 9th and 10th in the same sheet) and
+        # invalid/delta rows, regardless of whether a specific year or "All
+        # Years" was requested. Skipping it for year=None let those rows
+        # silently double-count the combined total.
         df = filter_df_year(df, year)
 
     # Some boards (Lahore, Sahiwal, ...) publish Regular/Private/Overall split
@@ -1605,11 +1655,11 @@ def extract_subject_data(board_sheets: dict, year=None) -> pd.DataFrame:
         if year_app_cols:
             appeared = pd.to_numeric(r[year_app_cols[0]], errors="coerce")
         elif all_app_cols:
-            appeared = pd.to_numeric([r[c] for c in all_app_cols], errors="coerce").sum()
+            appeared = pd.Series(pd.to_numeric([r[c] for c in all_app_cols], errors="coerce")).sum(min_count=1)
         if year_passed_cols:
             passed = pd.to_numeric(r[year_passed_cols[0]], errors="coerce")
         elif all_passed_cols:
-            passed = pd.to_numeric([r[c] for c in all_passed_cols], errors="coerce").sum()
+            passed = pd.Series(pd.to_numeric([r[c] for c in all_passed_cols], errors="coerce")).sum(min_count=1)
         if pass_col and pd.isna(pct):
             pct = pd.to_numeric(r.get(pass_col), errors="coerce")
         if appeared_col and pd.isna(appeared):
@@ -1651,6 +1701,16 @@ def extract_subject_data(board_sheets: dict, year=None) -> pd.DataFrame:
 def extract_district_data(board_sheets: dict, year=None) -> pd.DataFrame:
     df = _pick_sheet(board_sheets, ["District-wise", "Grade Distribution by District"])
     if df is None or df.empty:
+        if year is None:
+            available_years = _punjab_year_sheet_years(board_sheets, "district")
+            if len(available_years) > 1:
+                per_year = [extract_district_data(board_sheets, y) for y in available_years]
+                per_year = [d for d in per_year if d is not None and not d.empty]
+                if per_year:
+                    combined = pd.concat(per_year, ignore_index=True)
+                    out = combined.groupby("District", as_index=False)[["Appeared", "Passed", "Failed"]].sum()
+                    out["Pass %"] = (100 * out["Passed"] / out["Appeared"].replace(0, pd.NA)).round(1)
+                    return out.sort_values("Pass %", ascending=True)
         df, sheet_year = _pick_punjab_year_sheet(board_sheets, year, "district")
         if df is None:
             return pd.DataFrame(columns=["District", "Appeared", "Passed", "Failed", "Pass %"])
