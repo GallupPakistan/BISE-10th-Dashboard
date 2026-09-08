@@ -145,6 +145,12 @@ def render_board_page(
     # fail than a "worse" small-sample subject. This ranks by headcount.)
     if not subjects.empty and "Appeared" in subjects.columns and "Passed" in subjects.columns:
         valid = subjects.dropna(subset=["Appeared", "Passed"]).copy()
+        # Some boards only publish a Pass % per subject with no actual
+        # headcount — after summing, a missing/NaN count collapses to 0
+        # rather than staying NaN, so it can slip past dropna() above and
+        # get picked as the "winner" with a meaningless 0/0 row. Require a
+        # real, positive Appeared count too.
+        valid = valid[(valid["Appeared"] > 0) & (valid["Passed"] > 0)]
         if not valid.empty:
             valid["Failed"] = valid["Appeared"] - valid["Passed"]
             most_passed = valid.loc[valid["Passed"].idxmax()]
