@@ -1394,15 +1394,55 @@ def _extract_fsd_style_subject_sheet(board_sheets: dict, year):
 _SUBJECT_ALIAS_GROUPS = [
     ["MUTALA E QURAN HAKEEM", "MUTALIAE QURAN E HAKEEM", "MUTALIA E QURAN E HAKEEM",
      "MUTALIAE QURAN-E-HAKEEM", "MUTALIA-E-QURAN-E-HAKEEM", "MUTALIAE-QURAN-E-HAKEEM"],
-    ["TRANSLATION OF HOLY QURAN", "TRANSLATION OF THE HOLY QURAN"],
+    # Tarjama/Tarjuma-tul-Quran is Urdu for "Translation of the [Holy] Quran"
+    # — same paper, several spellings across boards.
+    ["TRANSLATION OF HOLY QURAN", "TRANSLATION OF THE HOLY QURAN",
+     "TARJAMA TUL QURAN", "TARJUMA TUL QURAN UL MAJEED", "TARJAMA TUL QURAN UL MAJEED"],
     ["MATHEMATICS", "MATHS", "MATH"],
     ["COMPUTER SCIENCE", "COMPUTER SCIENCES"],
+    # Punjab boards use "E.H.E" (Elements of Home Economics); KPK/others spell
+    # it out, sometimes singular "Element". All the same subject.
+    ["ELEMENTS OF HOME ECONOMICS", "ELEMENT OF HOME ECONOMICS", "EHE"],
+    # "Ethics (for other religion students)" / "Ethics (for non-Muslims)" is
+    # the same Ethics paper — the qualifier just names who takes it in place
+    # of Islamiyat.
+    ["ETHICS", "ETHICS FOR OTHER RELIGION STUDENTS", "ETHICS FOR NON MUSLIMS"],
+    ["ARITHMETIC", "ARITHEMATIC", "ARITHMATIC"],
+    ["CLOTHING AND TEXTILE", "CLOTHING AND TEXTILES"],
+    ["ELECTRICAL WIRING", "ELECTRIC WIRING"],
+    ["EMBROIDERY", "EMBORIDERY"],
+    ["GEOMETRICAL AND TECHNICAL DRAWING", "GEO AND TECH DRAWING"],
+    # Same "Islamic History" elective paper, phrased differently per board.
+    ["ISLAMIC HISTORY", "HISTORY ISLAMIC MUSLIM", "MUSLIM HISTORY", "HISTORY OF ISLAM"],
+    # "Islamiyat" is simply Urdu for "Islamic Studies" — same compulsory
+    # paper. Kept separate from the Elective-level groups below, since an
+    # Elective paper is a genuinely different offering, not just a spelling
+    # difference.
+    ["ISLAMIYAT", "ISLAMIC STUDIES", "ISLAMIYAT NEW COURSE"],
+    ["ISLAMIC STUDIES ELECTIVE", "ISLAMIYAT ELECTIVE"],
+    ["URDU DARS E NIZAMI", "URDU DAR SE NAZAMI"],
+    ["WOOD WORK FURNITURE MAKING", "WOODWORK FURNITURE MAKING", "WOOD WORK"],
 ]
 _SUBJECT_ALIAS_MAP = {}
 for _group in _SUBJECT_ALIAS_GROUPS:
     _canon = _group[0]
     for _variant in _group:
         _SUBJECT_ALIAS_MAP[_variant] = _canon
+
+# Nicely-cased display spelling for each alias group's canonical key, so the
+# chart shows "Elements of Home Economics" / "Ethics", never a raw
+# abbreviation like "E.H.E" just because that board happened to have the
+# most students.
+_SUBJECT_DISPLAY_OVERRIDE = {_group[0]: _group[0].title() for _group in _SUBJECT_ALIAS_GROUPS}
+
+# Whole-word abbreviation expansions applied before the alias-map lookup, so
+# e.g. "Health & Physical Edu" and "Health & Physical Education" converge
+# without needing every possible abbreviation spelled out above.
+_SUBJECT_WORD_EXPANSIONS = {
+    "EDU": "EDUCATION",
+    "PHYS": "PHYSICAL",
+    "PHYSCIAL": "PHYSICAL",  # common source typo for "Physical"
+}
 
 
 def _canonical_subject_key(name: str) -> str:
@@ -1412,15 +1452,29 @@ def _canonical_subject_key(name: str) -> str:
     key = re.sub(r"\s*\(\s*COMPULSORY\s*\)\s*", "", key)
     key = re.sub(r"\s*\(\s*COMP\.?\s*\)\s*", "", key)
     key = re.sub(r"\bCOMPULSORY\b", "", key)
+    key = re.sub(r"(?<!\()\bCOMP\b(?!\))", "", key)
+    key = key.replace("&", " AND ")
+    # Drop periods/colons ("E.H.E" -> "EHE", "Phys: Education" -> "Phys Education")
+    # rather than treating them as word separators, since boards use them as
+    # abbreviation punctuation, not spaces.
+    key = re.sub(r"[.:/]", " ", key)
     key = re.sub(r"[-_]", " ", key)
+    # A parenthetical qualifier that just names *who* takes the paper (e.g.
+    # "(For Other Religion Students)", "(For Non-Muslims)") rather than a
+    # different syllabus — strip the parens so the alias map above can match
+    # on the qualifier text alone.
+    key = re.sub(r"\(([^)]*)\)", lambda m: " " + m.group(1) + " ", key)
     # Boards often split a subject into Part-I / Part-II (9th + 10th class
     # papers) and report each half as its own row — e.g. "English-I" and
     # "English-II" — which otherwise show up as two separate subjects with
     # smaller, misleading counts instead of one combined "English" total.
+    # A trailing sub-part marker like "-I (a)" is stripped along with it.
     key = re.sub(r"\bPART\s*[-]?\s*(I{1,3}|IV|1|2|3|4)\s*$", "", key)
-    key = re.sub(r"\s+(I{1,3}|IV)\s*$", "", key)
+    key = re.sub(r"\s+(I{1,3}|IV)(\s+[A-Z])?\s*$", "", key)
     key = re.sub(r"\bTHE\b", "", key)
     key = re.sub(r"\s+", " ", key).strip()
+    words = [_SUBJECT_WORD_EXPANSIONS.get(w, w) for w in key.split(" ")]
+    key = " ".join(words)
     key = _SUBJECT_ALIAS_MAP.get(key, key)
     return key
 
@@ -1446,15 +1500,25 @@ def merge_similar_subjects(df: pd.DataFrame, subject_col: str = "Subject") -> pd
     else:
         weight = pd.Series(1, index=out.index)
     has_part_suffix = out[subject_col].str.contains(r"[-\s](?:I{1,3}|IV)\s*$", case=False, regex=True, na=False)
+    # Also deprioritize abbreviation-style ("E.H.E") or qualifier-style
+    # ("Ethics (For Non-Muslims)") spellings as the display label — even if
+    # one board's version of that spelling has the most students, it reads
+    # as a *different* subject to anyone unfamiliar with that abbreviation.
+    looks_cryptic = out[subject_col].str.contains(r"\.|\(", regex=True, na=False)
     label_scores = (
-        out.assign(_w=weight, _has_suffix=has_part_suffix)
-        .groupby(["_subject_key", subject_col])[["_w", "_has_suffix"]]
-        .agg({"_w": "sum", "_has_suffix": "first"})
+        out.assign(_w=weight, _has_suffix=has_part_suffix, _cryptic=looks_cryptic)
+        .groupby(["_subject_key", subject_col])[["_w", "_has_suffix", "_cryptic"]]
+        .agg({"_w": "sum", "_has_suffix": "first", "_cryptic": "first"})
         .reset_index()
-        .sort_values(["_subject_key", "_has_suffix", "_w"], ascending=[True, True, False])
+        .sort_values(["_subject_key", "_cryptic", "_has_suffix", "_w"], ascending=[True, True, True, False])
     )
     display_names = label_scores.drop_duplicates("_subject_key").set_index("_subject_key")[subject_col]
     out[subject_col] = out["_subject_key"].map(display_names)
+    # For subjects we already know a clean canonical spelling for (the first
+    # entry in each _SUBJECT_ALIAS_GROUPS list), always show that spelling —
+    # more reliable than picking whichever raw variant happened to have the
+    # most students, which could still be an abbreviation or qualified form.
+    out[subject_col] = out["_subject_key"].map(_SUBJECT_DISPLAY_OVERRIDE).fillna(out[subject_col])
     # If every raw spelling for a merged subject carried a Part-I/II suffix
     # (e.g. a board that only ever reports "English-I"/"English-II", never a
     # combined "English" line) and/or a "(Compulsory)" qualifier, strip them
