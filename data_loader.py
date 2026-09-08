@@ -1422,6 +1422,10 @@ _SUBJECT_ALIAS_GROUPS = [
     ["ISLAMIC STUDIES ELECTIVE", "ISLAMIYAT ELECTIVE"],
     ["URDU DARS E NIZAMI", "URDU DAR SE NAZAMI"],
     ["WOOD WORK FURNITURE MAKING", "WOODWORK FURNITURE MAKING", "WOOD WORK"],
+    # "General Mathematics" (the lighter paper taken by Arts/General-group
+    # students, as opposed to the full "Mathematics" Science-group paper) —
+    # kept as its own subject, just spelled/ordered differently per board.
+    ["GENERAL MATHEMATICS", "MATHEMATICS GENERAL ARTS"],
 ]
 _SUBJECT_ALIAS_MAP = {}
 for _group in _SUBJECT_ALIAS_GROUPS:
@@ -1442,6 +1446,8 @@ _SUBJECT_WORD_EXPANSIONS = {
     "EDU": "EDUCATION",
     "PHYS": "PHYSICAL",
     "PHYSCIAL": "PHYSICAL",  # common source typo for "Physical"
+    "MATH": "MATHEMATICS",
+    "MATHS": "MATHEMATICS",
 }
 
 
