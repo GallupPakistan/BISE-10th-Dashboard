@@ -139,6 +139,36 @@ def render_board_page(
         show_chart(treemap_chart(districts["District"].tolist(), dist_val.tolist(), "Share by District"))
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # ── Subject highlights: most-passed & most-failed by raw headcount ────────
+    # (Pass % alone can mislead here — a subject with a slightly lower Pass %
+    # but far more appeared candidates can still have more students actually
+    # fail than a "worse" small-sample subject. This ranks by headcount.)
+    if not subjects.empty and "Appeared" in subjects.columns and "Passed" in subjects.columns:
+        valid = subjects.dropna(subset=["Appeared", "Passed"]).copy()
+        if not valid.empty:
+            valid["Failed"] = valid["Appeared"] - valid["Passed"]
+            most_passed = valid.loc[valid["Passed"].idxmax()]
+            most_failed = valid.loc[valid["Failed"].idxmax()]
+            st.markdown('<div class="section-card">', unsafe_allow_html=True)
+            st.subheader("🏅 Subject Highlights — Most Passed & Most Failed")
+            hc1, hc2 = st.columns(2)
+            with hc1:
+                st.markdown(kpi_card(
+                    "✅ MOST PASSED SUBJECT",
+                    str(most_passed["Subject"]),
+                    f"{fmt_k(int(most_passed['Passed']))} passed · {most_passed['Pass %']:.1f}% pass rate",
+                    PASS_COLOR,
+                ), unsafe_allow_html=True)
+            with hc2:
+                fail_pct = round(100 - most_failed["Pass %"], 1)
+                st.markdown(kpi_card(
+                    "⚠️ MOST FAILED SUBJECT",
+                    str(most_failed["Subject"]),
+                    f"{fmt_k(int(most_failed['Failed']))} failed · {fail_pct:.1f}% fail rate",
+                    FAIL_COLOR,
+                ), unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+
     if not subjects.empty:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.subheader("🔵 Subjects: Volume vs Performance (Bubble)")
@@ -316,6 +346,3 @@ def render_board_page(
         show_chart(subject_pass_hbar(subjects, top_n=top_n_subjects))
         csv_download_button(subjects, "⬇️ Download subjects CSV", f"{selected_board_name}_subjects.csv")
         st.markdown("</div>", unsafe_allow_html=True)
-
-
-
