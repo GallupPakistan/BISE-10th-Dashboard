@@ -1421,7 +1421,12 @@ _SUBJECT_ALIAS_GROUPS = [
     ["ISLAMIYAT", "ISLAMIC STUDIES", "ISLAMIYAT NEW COURSE"],
     ["ISLAMIC STUDIES ELECTIVE", "ISLAMIYAT ELECTIVE"],
     ["URDU DARS E NIZAMI", "URDU DAR SE NAZAMI"],
-    ["WOOD WORK FURNITURE MAKING", "WOODWORK FURNITURE MAKING", "WOOD WORK"],
+    ["URDU LITERATURE", "URDU LITRATURE"],
+    ["WOOD WORK FURNITURE MAKING", "WOODWORK FURNITURE MAKING", "WOOD WORK", "WOOD WORKING FURNITURE MAKING"],
+    ["AL HADITH AND AL FIQAH", "AL HADIS AL FIQAH"],
+    # Seerat-ul-Rasool ("life of the Prophet") is a distinct elective paper —
+    # kept separate from base Islamiyat, just spelled several ways.
+    ["SEERAT UL RASOOL", "SEERATUL NABI", "ISLAMIYAT SEERAT UL RASOOL"],
     # "General Mathematics" (the lighter paper taken by Arts/General-group
     # students, as opposed to the full "Mathematics" Science-group paper) —
     # kept as its own subject, just spelled/ordered differently per board.
@@ -1463,7 +1468,8 @@ def _canonical_subject_key(name: str) -> str:
     # Drop periods/colons ("E.H.E" -> "EHE", "Phys: Education" -> "Phys Education")
     # rather than treating them as word separators, since boards use them as
     # abbreviation punctuation, not spaces.
-    key = re.sub(r"[.:/]", " ", key)
+    key = re.sub(r"\.", "", key)
+    key = re.sub(r"[:/]", " ", key)
     key = re.sub(r"[-_]", " ", key)
     # A parenthetical qualifier that just names *who* takes the paper (e.g.
     # "(For Other Religion Students)", "(For Non-Muslims)") rather than a
